@@ -16,7 +16,7 @@ export class ZoomerProjectile extends LinearProjectile {
     super(scene, "zoomer-projectile", ZOOMER_PROJECTILE_SPEED, ZOOMER_PROJECTILE_RADIUS);
   }
 
-  step(delta: number, arena: ArenaBounds): boolean {
+  step(delta: number, arena: ArenaBounds, _playerX: number, _playerY: number): boolean {
     this.move(delta);
     return this.hasEscaped(arena);
   }

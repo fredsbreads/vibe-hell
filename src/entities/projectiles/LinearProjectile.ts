@@ -51,6 +51,10 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     return dist > arena.radius + ESCAPE_MARGIN;
   }
 
-  /** Advances the projectile. Returns true once it should be despawned (e.g. flew past the wall). */
-  abstract step(delta: number, arena: ArenaBounds): boolean;
+  /**
+   * Advances the projectile. Returns true once it should be despawned (e.g.
+   * flew past the wall). playerX/playerY are provided for subclasses (like
+   * Chaser) that re-aim at the player mid-flight; most ignore them.
+   */
+  abstract step(delta: number, arena: ArenaBounds, playerX: number, playerY: number): boolean;
 }

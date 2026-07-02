@@ -16,7 +16,7 @@ export class BasicProjectile extends LinearProjectile {
   }
 
   /** Moves and bounces off the arena wall. Returns true if it has drifted well past the wall and should be despawned. */
-  step(delta: number, arena: ArenaBounds): boolean {
+  step(delta: number, arena: ArenaBounds, _playerX: number, _playerY: number): boolean {
     this.move(delta);
 
     const dx = this.x - arena.centerX;

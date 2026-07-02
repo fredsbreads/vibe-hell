@@ -16,7 +16,7 @@ export class StopWaveProjectile extends LinearProjectile {
     super(scene, "stopwave-projectile", STOP_WAVE_SPEED, STOP_WAVE_RADIUS);
   }
 
-  step(delta: number, arena: ArenaBounds): boolean {
+  step(delta: number, arena: ArenaBounds, _playerX: number, _playerY: number): boolean {
     this.move(delta);
     return this.hasEscaped(arena);
   }
