@@ -27,7 +27,7 @@ export class MainScene extends Phaser.Scene {
       .circle(this.arena.centerX, this.arena.centerY, this.arena.radius, 0x1a1a2e)
       .setStrokeStyle(4, 0x4a4a6a);
 
-    this.player = new Player(this, this.arena.centerX, this.arena.centerY);
+    this.player = new Player(this, this.arena.centerX, this.arena.centerY, this.arena);
     this.projectileManager = new ProjectileManager(this, this.arena);
 
     this.threatsText = this.add
