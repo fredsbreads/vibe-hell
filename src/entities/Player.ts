@@ -110,6 +110,15 @@ export class Player {
     this.hp = Math.max(0, this.hp - amount);
   }
 
+  /** Hard counter for Stop Waves: cancels any active dash, strips i-frames, and deals damage, bypassing normal invincibility. */
+  interruptDashAndDamage(amount: number): void {
+    this.isDashing = false;
+    this.isInvincible = false;
+    this.dashTimeRemainingMs = 0;
+    this.sprite.setVelocity(0, 0);
+    this.takeDamage(amount);
+  }
+
   /** The active slash hit-region for this frame, or null if the slash isn't currently active. */
   getActiveSlashHitbox(): SlashHitbox | null {
     if (this.slashActiveRemainingMs <= 0) {

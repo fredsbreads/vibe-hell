@@ -1,50 +1,23 @@
 import Phaser from "phaser";
 import { ArenaBounds } from "../../config/arena";
+import { LinearProjectile } from "./LinearProjectile";
 
 export const BASIC_PROJECTILE_SPEED = 160;
 export const BASIC_PROJECTILE_RADIUS = 8;
 
-/** How far past the arena wall a projectile must drift before it's considered escaped (safety net for future non-bouncing types). */
-const ESCAPE_MARGIN = 80;
-
 /**
  * A pooled Basic threat: aims at the player once on spawn, then travels in a
  * straight line and mirror-bounces off the arena wall, per the GDD's
- * "highly predictable" wave 1-2 deflection rule. Toggled via
- * setActive/setVisible rather than created/destroyed for pooling.
+ * "highly predictable" wave 1-2 deflection rule.
  */
-export class BasicProjectile extends Phaser.GameObjects.Image {
-  readonly radius = BASIC_PROJECTILE_RADIUS;
-
-  private vx = 0;
-  private vy = 0;
-
+export class BasicProjectile extends LinearProjectile {
   constructor(scene: Phaser.Scene) {
-    super(scene, 0, 0, "basic-projectile");
-    scene.add.existing(this);
-    this.setActive(false);
-    this.setVisible(false);
-  }
-
-  activate(x: number, y: number, targetX: number, targetY: number): void {
-    this.setPosition(x, y);
-    const angle = Math.atan2(targetY - y, targetX - x);
-    this.vx = Math.cos(angle) * BASIC_PROJECTILE_SPEED;
-    this.vy = Math.sin(angle) * BASIC_PROJECTILE_SPEED;
-    this.setActive(true);
-    this.setVisible(true);
-  }
-
-  deactivate(): void {
-    this.setActive(false);
-    this.setVisible(false);
+    super(scene, "basic-projectile", BASIC_PROJECTILE_SPEED, BASIC_PROJECTILE_RADIUS);
   }
 
   /** Moves and bounces off the arena wall. Returns true if it has drifted well past the wall and should be despawned. */
   step(delta: number, arena: ArenaBounds): boolean {
-    const dt = delta / 1000;
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
+    this.move(delta);
 
     const dx = this.x - arena.centerX;
     const dy = this.y - arena.centerY;
@@ -63,6 +36,6 @@ export class BasicProjectile extends Phaser.GameObjects.Image {
       this.vy -= 2 * dot * ny;
     }
 
-    return distFromCenter > arena.radius + ESCAPE_MARGIN;
+    return this.hasEscaped(arena);
   }
 }

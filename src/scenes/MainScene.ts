@@ -3,6 +3,8 @@ import { Player } from "../entities/Player";
 import { ProjectileManager } from "../managers/ProjectileManager";
 import { ArenaBounds, ARENA_RADIUS } from "../config/arena";
 import { BASIC_PROJECTILE_RADIUS } from "../entities/projectiles/BasicProjectile";
+import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjectile";
+import { STOP_WAVE_RADIUS } from "../entities/projectiles/StopWaveProjectile";
 
 export class MainScene extends Phaser.Scene {
   private player!: Player;
@@ -11,6 +13,7 @@ export class MainScene extends Phaser.Scene {
 
   private threatsEndured = 0;
   private threatsText!: Phaser.GameObjects.Text;
+  private debugText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("MainScene");
@@ -20,8 +23,10 @@ export class MainScene extends Phaser.Scene {
     const { width, height } = this.scale;
     this.arena = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
 
-    this.generatePlayerTexture();
-    this.generateBasicProjectileTexture();
+    this.generateCircleTexture("player", Player.RADIUS, 0x59f2c8);
+    this.generateCircleTexture("basic-projectile", BASIC_PROJECTILE_RADIUS, 0xff6b4a);
+    this.generateCircleTexture("zoomer-projectile", ZOOMER_PROJECTILE_RADIUS, 0xf2e85c);
+    this.generateCircleTexture("stopwave-projectile", STOP_WAVE_RADIUS, 0x5c8df2);
 
     this.add
       .circle(this.arena.centerX, this.arena.centerY, this.arena.radius, 0x1a1a2e)
@@ -37,6 +42,17 @@ export class MainScene extends Phaser.Scene {
         color: "#e0e0f0",
       })
       .setOrigin(1, 0);
+
+    this.debugText = this.add
+      .text(width - 12, height - 12, "", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        color: "#8a8aa0",
+        align: "right",
+      })
+      .setOrigin(1, 1);
+
+    this.setupDebugSpawnToggles();
   }
 
   update(_time: number, delta: number): void {
@@ -57,29 +73,45 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    // Stop Waves are a hard counter: checked unconditionally, bypassing dash i-frames.
+    const stopWaveHits = this.projectileManager.checkStopWaveCollisions(
+      this.player.sprite.x,
+      this.player.sprite.y,
+      Player.RADIUS,
+    );
+    if (stopWaveHits > 0) {
+      this.player.interruptDashAndDamage(stopWaveHits);
+    }
+
     this.threatsText.setText(`THREATS ENDURED: ${this.threatsEndured}`);
+    this.updateDebugText();
   }
 
-  private generatePlayerTexture(): void {
-    if (this.textures.exists("player")) {
-      return;
-    }
-    const graphics = this.add.graphics();
-    graphics.fillStyle(0x59f2c8, 1);
-    graphics.fillCircle(16, 16, 16);
-    graphics.generateTexture("player", 32, 32);
-    graphics.destroy();
+  /** Debug-only: number keys manually toggle Zoomer/Stop Wave spawning on and off for isolated verification. */
+  private setupDebugSpawnToggles(): void {
+    this.input.keyboard!.on("keydown-ONE", () => {
+      this.projectileManager.setZoomerSpawningEnabled(!this.projectileManager.isZoomerSpawningEnabled);
+    });
+    this.input.keyboard!.on("keydown-TWO", () => {
+      this.projectileManager.setStopWaveSpawningEnabled(!this.projectileManager.isStopWaveSpawningEnabled);
+    });
   }
 
-  private generateBasicProjectileTexture(): void {
-    if (this.textures.exists("basic-projectile")) {
+  private updateDebugText(): void {
+    const zoomerState = this.projectileManager.isZoomerSpawningEnabled ? "ON" : "off";
+    const stopWaveState = this.projectileManager.isStopWaveSpawningEnabled ? "ON" : "off";
+    this.debugText.setText(`[DEBUG] 1: Zoomer spawn ${zoomerState}   2: Stop Wave spawn ${stopWaveState}`);
+  }
+
+  private generateCircleTexture(key: string, radius: number, color: number): void {
+    if (this.textures.exists(key)) {
       return;
     }
-    const size = BASIC_PROJECTILE_RADIUS * 2;
+    const size = radius * 2;
     const graphics = this.add.graphics();
-    graphics.fillStyle(0xff6b4a, 1);
-    graphics.fillCircle(BASIC_PROJECTILE_RADIUS, BASIC_PROJECTILE_RADIUS, BASIC_PROJECTILE_RADIUS);
-    graphics.generateTexture("basic-projectile", size, size);
+    graphics.fillStyle(color, 1);
+    graphics.fillCircle(radius, radius, radius);
+    graphics.generateTexture(key, size, size);
     graphics.destroy();
   }
 }
