@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ArenaBounds } from "../../config/arena";
+import { Arena } from "../../arena/Arena";
 
 /** How far past the arena wall a projectile must drift before it's considered escaped. */
 const ESCAPE_MARGIN = 80;
@@ -67,9 +67,12 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     return true;
   }
 
-  protected hasEscaped(arena: ArenaBounds): boolean {
-    const dist = Math.hypot(this.x - arena.centerX, this.y - arena.centerY);
-    return dist > arena.radius + ESCAPE_MARGIN;
+  protected hasEscaped(arena: Arena): boolean {
+    const dx = this.x - arena.bounds.centerX;
+    const dy = this.y - arena.bounds.centerY;
+    const dist = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    return dist > arena.maxRadiusAtAngle(angle) + ESCAPE_MARGIN;
   }
 
   /**
@@ -77,5 +80,5 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
    * flew past the wall). playerX/playerY are provided for subclasses (like
    * Chaser) that re-aim at the player mid-flight; most ignore them.
    */
-  abstract step(delta: number, arena: ArenaBounds, playerX: number, playerY: number): boolean;
+  abstract step(delta: number, arena: Arena, playerX: number, playerY: number): boolean;
 }

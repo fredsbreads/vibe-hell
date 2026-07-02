@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ArenaBounds } from "../../config/arena";
+import { Arena } from "../../arena/Arena";
 import { LinearProjectile } from "./LinearProjectile";
 
 export const STOP_WAVE_SPEED = 55;
@@ -16,7 +16,7 @@ export class StopWaveProjectile extends LinearProjectile {
     super(scene, "stopwave-projectile", STOP_WAVE_SPEED, STOP_WAVE_RADIUS);
   }
 
-  step(delta: number, arena: ArenaBounds, _playerX: number, _playerY: number): boolean {
+  step(delta: number, arena: Arena, _playerX: number, _playerY: number): boolean {
     if (!this.move(delta)) {
       return false;
     }

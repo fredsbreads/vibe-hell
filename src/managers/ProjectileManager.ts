@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ArenaBounds } from "../config/arena";
+import { Arena } from "../arena/Arena";
 import { LinearProjectile } from "../entities/projectiles/LinearProjectile";
 import { BasicProjectile } from "../entities/projectiles/BasicProjectile";
 import { ZoomerProjectile } from "../entities/projectiles/ZoomerProjectile";
@@ -75,22 +75,21 @@ function findInactive<T extends LinearProjectile>(pool: T[]): T | undefined {
 
 function spawnOnPerimeter(
   projectile: LinearProjectile,
-  arena: ArenaBounds,
+  arena: Arena,
   playerX: number,
   playerY: number,
   safeLaneCenterAngle: number,
 ): void {
-  const playerAngle = Math.atan2(playerY - arena.centerY, playerX - arena.centerX);
+  const playerAngle = Math.atan2(playerY - arena.bounds.centerY, playerX - arena.bounds.centerX);
   const angle = pickSafeSpawnAngle(playerAngle, safeLaneCenterAngle);
-  const spawnX = arena.centerX + Math.cos(angle) * arena.radius;
-  const spawnY = arena.centerY + Math.sin(angle) * arena.radius;
-  projectile.activate(spawnX, spawnY, playerX, playerY);
+  const spawnPoint = arena.boundaryPointAtAngle(angle);
+  projectile.activate(spawnPoint.x, spawnPoint.y, playerX, playerY);
 }
 
 function stepPool(
   pool: LinearProjectile[],
   delta: number,
-  arena: ArenaBounds,
+  arena: Arena,
   playerX: number,
   playerY: number,
 ): number {
@@ -157,7 +156,7 @@ function checkContactOnPool(
  */
 export class ProjectileManager {
   private readonly scene: Phaser.Scene;
-  private readonly arena: ArenaBounds;
+  private readonly arena: Arena;
 
   private readonly basicPool: BasicProjectile[] = [];
   private basicSpawnTimerMs = BASIC_BASE_SPAWN_INTERVAL_MS;
@@ -180,7 +179,7 @@ export class ProjectileManager {
   /** Multiplies spawn frequency (shorter intervals = more threats) as waves progress. */
   private difficultyMultiplier = 1;
 
-  constructor(scene: Phaser.Scene, arena: ArenaBounds) {
+  constructor(scene: Phaser.Scene, arena: Arena) {
     this.scene = scene;
     this.arena = arena;
 
@@ -261,6 +260,8 @@ export class ProjectileManager {
 
   /** Advances all spawners and active projectiles. Returns how many escaped the arena unhandled (should be scored). */
   update(delta: number, playerX: number, playerY: number): number {
+    this.arena.update(delta);
+
     this.safeLaneCenterAngleValue = Phaser.Math.Angle.Wrap(
       this.safeLaneCenterAngleValue + SAFE_LANE_ROTATION_RADIANS_PER_MS * delta,
     );

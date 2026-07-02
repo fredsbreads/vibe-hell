@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { PlayerInput, InputState } from "../input/PlayerInput";
-import { ArenaBounds } from "../config/arena";
+import { Arena } from "../arena/Arena";
 
 const DASH_TINT = 0xaefff0;
 const HURT_TINT = 0xff3b3b;
@@ -57,7 +57,7 @@ export class Player {
     private readonly scene: Phaser.Scene,
     x: number,
     y: number,
-    private readonly arena: ArenaBounds,
+    private readonly arena: Arena,
   ) {
     this.input = new PlayerInput(scene);
 
@@ -243,15 +243,20 @@ export class Player {
   }
 
   private clampToArena(): void {
-    const dx = this.sprite.x - this.arena.centerX;
-    const dy = this.sprite.y - this.arena.centerY;
+    const dx = this.sprite.x - this.arena.bounds.centerX;
+    const dy = this.sprite.y - this.arena.bounds.centerY;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const maxDist = this.arena.radius - Player.RADIUS;
+    if (dist <= 0) {
+      return;
+    }
 
-    if (dist > maxDist && dist > 0) {
+    const angle = Math.atan2(dy, dx);
+    const maxDist = this.arena.maxRadiusAtAngle(angle) - Player.RADIUS;
+
+    if (dist > maxDist) {
       const scale = maxDist / dist;
-      const clampedX = this.arena.centerX + dx * scale;
-      const clampedY = this.arena.centerY + dy * scale;
+      const clampedX = this.arena.bounds.centerX + dx * scale;
+      const clampedY = this.arena.bounds.centerY + dy * scale;
       // setPosition() alone would leave the Arcade body's internal position out of
       // sync, letting it drift past the wall on the next physics step. body.reset()
       // repositions and re-syncs both, and halts velocity into the wall.

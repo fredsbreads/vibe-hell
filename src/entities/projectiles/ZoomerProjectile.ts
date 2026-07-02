@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ArenaBounds } from "../../config/arena";
+import { Arena } from "../../arena/Arena";
 import { LinearProjectile } from "./LinearProjectile";
 
 export const ZOOMER_PROJECTILE_SPEED = 460;
@@ -16,7 +16,7 @@ export class ZoomerProjectile extends LinearProjectile {
     super(scene, "zoomer-projectile", ZOOMER_PROJECTILE_SPEED, ZOOMER_PROJECTILE_RADIUS);
   }
 
-  step(delta: number, arena: ArenaBounds, _playerX: number, _playerY: number): boolean {
+  step(delta: number, arena: Arena, _playerX: number, _playerY: number): boolean {
     if (!this.move(delta)) {
       return false;
     }

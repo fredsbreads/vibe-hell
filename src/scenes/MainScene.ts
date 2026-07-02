@@ -3,21 +3,38 @@ import { Player } from "../entities/Player";
 import { ProjectileManager, SAFE_LANE_ARC_RADIANS } from "../managers/ProjectileManager";
 import { WaveManager } from "../managers/WaveManager";
 import { ArenaBounds, ARENA_RADIUS } from "../config/arena";
+import { Arena } from "../arena/Arena";
+import { ArenaShape } from "../arena/ArenaShape";
+import { CircleArena } from "../arena/CircleArena";
+import { PolygonArena } from "../arena/PolygonArena";
 import { BASIC_PROJECTILE_RADIUS } from "../entities/projectiles/BasicProjectile";
 import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjectile";
 import { STOP_WAVE_RADIUS } from "../entities/projectiles/StopWaveProjectile";
 import { CHASER_PROJECTILE_RADIUS } from "../entities/projectiles/ChaserProjectile";
 
+/** One full rotation every 30s for spinning arena shapes - slow enough to track, per the GDD's "Spin" wave stage. */
+const ARENA_ROTATION_RAD_PER_MS = (Math.PI * 2) / 30000;
+
+/** Debug-cyclable arena shapes (key 4), demonstrating the shape abstraction beyond the default circle. */
+const ARENA_SHAPE_CYCLE: Array<{ label: string; build: (bounds: ArenaBounds) => ArenaShape }> = [
+  { label: "Circle", build: (bounds) => new CircleArena(bounds) },
+  { label: "Square", build: (bounds) => new PolygonArena(bounds, 4, ARENA_ROTATION_RAD_PER_MS) },
+  { label: "Hexagon", build: (bounds) => new PolygonArena(bounds, 6, ARENA_ROTATION_RAD_PER_MS) },
+  { label: "Octagon", build: (bounds) => new PolygonArena(bounds, 8, ARENA_ROTATION_RAD_PER_MS) },
+];
+
 export class MainScene extends Phaser.Scene {
   private player!: Player;
   private projectileManager!: ProjectileManager;
   private waveManager!: WaveManager;
-  private arena!: ArenaBounds;
+  private arena!: Arena;
+  private arenaShapeIndex = 0;
 
   private threatsEndured = 0;
   private threatsText!: Phaser.GameObjects.Text;
   private debugText!: Phaser.GameObjects.Text;
   private safeLaneGraphic!: Phaser.GameObjects.Graphics;
+  private arenaOutlineGraphic!: Phaser.GameObjects.Graphics;
   private waveText!: Phaser.GameObjects.Text;
   private waveBannerText!: Phaser.GameObjects.Text;
 
@@ -27,7 +44,8 @@ export class MainScene extends Phaser.Scene {
 
   create(): void {
     const { width, height } = this.scale;
-    this.arena = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
+    const arenaBounds: ArenaBounds = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
+    this.arena = new Arena(arenaBounds, ARENA_SHAPE_CYCLE[this.arenaShapeIndex].build(arenaBounds));
 
     this.generateCircleTexture("player", Player.RADIUS, 0x59f2c8);
     this.generateCircleTexture("basic-projectile", BASIC_PROJECTILE_RADIUS, 0xff6b4a);
@@ -35,13 +53,10 @@ export class MainScene extends Phaser.Scene {
     this.generateCircleTexture("stopwave-projectile", STOP_WAVE_RADIUS, 0x5c8df2);
     this.generateCircleTexture("chaser-projectile", CHASER_PROJECTILE_RADIUS, 0xd35cf2);
 
-    this.add
-      .circle(this.arena.centerX, this.arena.centerY, this.arena.radius, 0x1a1a2e)
-      .setStrokeStyle(4, 0x4a4a6a);
-
+    this.arenaOutlineGraphic = this.add.graphics();
     this.safeLaneGraphic = this.add.graphics();
 
-    this.player = new Player(this, this.arena.centerX, this.arena.centerY, this.arena);
+    this.player = new Player(this, arenaBounds.centerX, arenaBounds.centerY, this.arena);
     this.projectileManager = new ProjectileManager(this, this.arena);
     this.waveManager = new WaveManager(this.projectileManager);
 
@@ -62,7 +77,7 @@ export class MainScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
 
     this.waveBannerText = this.add
-      .text(this.arena.centerX, this.arena.centerY, "", {
+      .text(arenaBounds.centerX, arenaBounds.centerY, "", {
         fontFamily: "monospace",
         fontSize: "36px",
         color: "#ffe98a",
@@ -116,6 +131,7 @@ export class MainScene extends Phaser.Scene {
     this.threatsText.setText(`THREATS ENDURED: ${this.threatsEndured}`);
     this.updateDebugText();
     this.updateWaveUi();
+    this.redrawArenaOutline();
     this.redrawSafeLane();
   }
 
@@ -132,19 +148,52 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  /** Renders the Safe Lane Volley Rule's guaranteed-empty arc on the arena wall, so it's an actual visible lane, not just an internal rule. */
+  /** Draws the current arena shape's wall - a smooth circle, or a closed polyline through a polygon's (possibly spinning) vertices. */
+  private redrawArenaOutline(): void {
+    const vertices = this.arena.getRenderVertices();
+    this.arenaOutlineGraphic.clear();
+    this.arenaOutlineGraphic.fillStyle(0x1a1a2e, 1);
+    this.arenaOutlineGraphic.lineStyle(4, 0x4a4a6a, 1);
+
+    if (!vertices) {
+      const { centerX, centerY, radius } = this.arena.bounds;
+      this.arenaOutlineGraphic.fillCircle(centerX, centerY, radius);
+      this.arenaOutlineGraphic.strokeCircle(centerX, centerY, radius);
+      return;
+    }
+
+    this.arenaOutlineGraphic.beginPath();
+    this.arenaOutlineGraphic.moveTo(vertices[0].x, vertices[0].y);
+    for (let i = 1; i < vertices.length; i++) {
+      this.arenaOutlineGraphic.lineTo(vertices[i].x, vertices[i].y);
+    }
+    this.arenaOutlineGraphic.closePath();
+    this.arenaOutlineGraphic.fillPath();
+    this.arenaOutlineGraphic.strokePath();
+  }
+
+  /** Renders the Safe Lane Volley Rule's guaranteed-empty arc, sampled along the current wall shape so it hugs flat edges/corners too, not just a circle. */
   private redrawSafeLane(): void {
     const center = this.projectileManager.safeLaneCenterAngle;
     const half = SAFE_LANE_ARC_RADIANS / 2;
+    const segments = 32;
 
     this.safeLaneGraphic.clear();
     this.safeLaneGraphic.lineStyle(6, 0x59f2c8, 0.3);
     this.safeLaneGraphic.beginPath();
-    this.safeLaneGraphic.arc(this.arena.centerX, this.arena.centerY, this.arena.radius, center - half, center + half);
+    for (let i = 0; i <= segments; i++) {
+      const angle = center - half + (SAFE_LANE_ARC_RADIANS * i) / segments;
+      const point = this.arena.boundaryPointAtAngle(angle);
+      if (i === 0) {
+        this.safeLaneGraphic.moveTo(point.x, point.y);
+      } else {
+        this.safeLaneGraphic.lineTo(point.x, point.y);
+      }
+    }
     this.safeLaneGraphic.strokePath();
   }
 
-  /** Debug-only: number keys manually toggle each threat type's spawning on and off for isolated verification. */
+  /** Debug-only: number keys manually toggle each threat type's spawning; key 4 cycles the arena shape. */
   private setupDebugSpawnToggles(): void {
     this.input.keyboard!.on("keydown-ONE", () => {
       this.projectileManager.setZoomerSpawningEnabled(!this.projectileManager.isZoomerSpawningEnabled);
@@ -155,14 +204,19 @@ export class MainScene extends Phaser.Scene {
     this.input.keyboard!.on("keydown-THREE", () => {
       this.projectileManager.setChaserSpawningEnabled(!this.projectileManager.isChaserSpawningEnabled);
     });
+    this.input.keyboard!.on("keydown-FOUR", () => {
+      this.arenaShapeIndex = (this.arenaShapeIndex + 1) % ARENA_SHAPE_CYCLE.length;
+      this.arena.setShape(ARENA_SHAPE_CYCLE[this.arenaShapeIndex].build(this.arena.bounds));
+    });
   }
 
   private updateDebugText(): void {
     const zoomerState = this.projectileManager.isZoomerSpawningEnabled ? "ON" : "off";
     const stopWaveState = this.projectileManager.isStopWaveSpawningEnabled ? "ON" : "off";
     const chaserState = this.projectileManager.isChaserSpawningEnabled ? "ON" : "off";
+    const shapeLabel = ARENA_SHAPE_CYCLE[this.arenaShapeIndex].label;
     this.debugText.setText(
-      `[DEBUG] 1: Zoomer ${zoomerState}   2: Stop Wave ${stopWaveState}   3: Chaser ${chaserState}`,
+      `[DEBUG] 1: Zoomer ${zoomerState}   2: Stop Wave ${stopWaveState}   3: Chaser ${chaserState}   4: Arena (${shapeLabel})`,
     );
   }
 
