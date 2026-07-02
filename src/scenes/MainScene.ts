@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Player } from "../entities/Player";
 import { ProjectileManager, SAFE_LANE_ARC_RADIANS } from "../managers/ProjectileManager";
+import { WaveManager } from "../managers/WaveManager";
 import { ArenaBounds, ARENA_RADIUS } from "../config/arena";
 import { BASIC_PROJECTILE_RADIUS } from "../entities/projectiles/BasicProjectile";
 import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjectile";
@@ -10,12 +11,15 @@ import { CHASER_PROJECTILE_RADIUS } from "../entities/projectiles/ChaserProjecti
 export class MainScene extends Phaser.Scene {
   private player!: Player;
   private projectileManager!: ProjectileManager;
+  private waveManager!: WaveManager;
   private arena!: ArenaBounds;
 
   private threatsEndured = 0;
   private threatsText!: Phaser.GameObjects.Text;
   private debugText!: Phaser.GameObjects.Text;
   private safeLaneGraphic!: Phaser.GameObjects.Graphics;
+  private waveText!: Phaser.GameObjects.Text;
+  private waveBannerText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("MainScene");
@@ -39,6 +43,7 @@ export class MainScene extends Phaser.Scene {
 
     this.player = new Player(this, this.arena.centerX, this.arena.centerY, this.arena);
     this.projectileManager = new ProjectileManager(this, this.arena);
+    this.waveManager = new WaveManager(this.projectileManager);
 
     this.threatsText = this.add
       .text(width - 12, 12, "", {
@@ -47,6 +52,24 @@ export class MainScene extends Phaser.Scene {
         color: "#e0e0f0",
       })
       .setOrigin(1, 0);
+
+    this.waveText = this.add
+      .text(width / 2, 12, "", {
+        fontFamily: "monospace",
+        fontSize: "16px",
+        color: "#e0e0f0",
+      })
+      .setOrigin(0.5, 0);
+
+    this.waveBannerText = this.add
+      .text(this.arena.centerX, this.arena.centerY, "", {
+        fontFamily: "monospace",
+        fontSize: "36px",
+        color: "#ffe98a",
+        align: "center",
+      })
+      .setOrigin(0.5)
+      .setDepth(10);
 
     this.debugText = this.add
       .text(width - 12, height - 12, "", {
@@ -88,9 +111,25 @@ export class MainScene extends Phaser.Scene {
       this.player.interruptDashAndDamage(stopWaveHits);
     }
 
+    this.waveManager.update(delta);
+
     this.threatsText.setText(`THREATS ENDURED: ${this.threatsEndured}`);
     this.updateDebugText();
+    this.updateWaveUi();
     this.redrawSafeLane();
+  }
+
+  /** "WAVE X" + time remaining while active; a "WAVE X COMPLETE" banner during the Breather Window intermission. */
+  private updateWaveUi(): void {
+    const secondsLeft = Math.max(0, Math.ceil(this.waveManager.phaseTimeRemainingMs / 1000));
+
+    if (this.waveManager.phase === "active") {
+      this.waveText.setText(`WAVE ${this.waveManager.currentWave}   ${secondsLeft}s`);
+      this.waveBannerText.setText("");
+    } else {
+      this.waveText.setText(`WAVE ${this.waveManager.currentWave} COMPLETE`);
+      this.waveBannerText.setText(`WAVE ${this.waveManager.currentWave} COMPLETE\nnext wave in ${secondsLeft}s`);
+    }
   }
 
   /** Renders the Safe Lane Volley Rule's guaranteed-empty arc on the arena wall, so it's an actual visible lane, not just an internal rule. */

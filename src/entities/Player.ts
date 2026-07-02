@@ -2,6 +2,12 @@ import Phaser from "phaser";
 import { PlayerInput, InputState } from "../input/PlayerInput";
 import { ArenaBounds } from "../config/arena";
 
+const DASH_TINT = 0xaefff0;
+const HURT_TINT = 0xff3b3b;
+const HURT_FLASH_MS = 150;
+const HURT_SHAKE_DURATION_MS = 120;
+const HURT_SHAKE_INTENSITY = 0.008;
+
 const MOVE_SPEED = 320;
 
 const DASH_SPEED = 900;
@@ -48,7 +54,7 @@ export class Player {
   private hp = STARTING_HP;
 
   constructor(
-    scene: Phaser.Scene,
+    private readonly scene: Phaser.Scene,
     x: number,
     y: number,
     private readonly arena: ArenaBounds,
@@ -108,6 +114,7 @@ export class Player {
 
   takeDamage(amount: number): void {
     this.hp = Math.max(0, this.hp - amount);
+    this.playHurtEffect();
   }
 
   /** Hard counter for Stop Waves: cancels any active dash, strips i-frames, and deals damage, bypassing normal invincibility. */
@@ -153,17 +160,49 @@ export class Player {
     this.dashTimeRemainingMs = DASH_DURATION_MS;
     this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
     this.sprite.setVelocity(dashDirection.x * DASH_SPEED, dashDirection.y * DASH_SPEED);
+
+    this.sprite.setTint(DASH_TINT);
+    this.spawnDashGhost();
   }
 
   private updateDash(delta: number): void {
     if (!this.isDashing) {
       return;
     }
+    this.spawnDashGhost();
     this.dashTimeRemainingMs -= delta;
     if (this.dashTimeRemainingMs <= 0) {
       this.isDashing = false;
       this.isInvincible = false;
+      this.sprite.clearTint();
     }
+  }
+
+  /** A fading afterimage left behind during a dash, so the burst reads as motion rather than a teleport. */
+  private spawnDashGhost(): void {
+    const ghost = this.scene.add.image(this.sprite.x, this.sprite.y, "player");
+    ghost.setTint(DASH_TINT);
+    ghost.setAlpha(0.5);
+    this.scene.tweens.add({
+      targets: ghost,
+      alpha: 0,
+      scale: 0.7,
+      duration: 220,
+      onComplete: () => ghost.destroy(),
+    });
+  }
+
+  /** Red tint flash + camera shake on taking damage, so a hit reads as an event rather than a silent number change. */
+  private playHurtEffect(): void {
+    this.sprite.setTint(HURT_TINT);
+    this.scene.time.delayedCall(HURT_FLASH_MS, () => {
+      if (this.isDashing) {
+        this.sprite.setTint(DASH_TINT);
+      } else {
+        this.sprite.clearTint();
+      }
+    });
+    this.scene.cameras.main.shake(HURT_SHAKE_DURATION_MS, HURT_SHAKE_INTENSITY);
   }
 
   private startSlash(angle: number): void {

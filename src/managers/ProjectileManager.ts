@@ -6,18 +6,22 @@ import { ZoomerProjectile } from "../entities/projectiles/ZoomerProjectile";
 import { StopWaveProjectile } from "../entities/projectiles/StopWaveProjectile";
 import { ChaserProjectile } from "../entities/projectiles/ChaserProjectile";
 import { SlashHitbox } from "../entities/Player";
+import { spawnPop } from "../effects/spawnPop";
+
+const SLASH_KILL_POP_COLOR = 0xffe98a;
+const HIT_POP_COLOR = 0xff3b3b;
 
 const BASIC_POOL_SIZE = 100;
-const BASIC_SPAWN_INTERVAL_MS = 1500;
+const BASIC_BASE_SPAWN_INTERVAL_MS = 1500;
 
 const ZOOMER_POOL_SIZE = 100;
-const ZOOMER_SPAWN_INTERVAL_MS = 1000;
+const ZOOMER_BASE_SPAWN_INTERVAL_MS = 1000;
 
 const STOP_WAVE_POOL_SIZE = 30;
-const STOP_WAVE_SPAWN_INTERVAL_MS = 2500;
+const STOP_WAVE_BASE_SPAWN_INTERVAL_MS = 2500;
 
 const CHASER_POOL_SIZE = 60;
-const CHASER_SPAWN_INTERVAL_MS = 1800;
+const CHASER_BASE_SPAWN_INTERVAL_MS = 1800;
 
 /**
  * Fair-Play Spawner Rules (GDD section 4). Two exclusion zones are carved out
@@ -103,13 +107,14 @@ function stepPool(
   return escaped;
 }
 
-function checkSlashHitsOnPool(pool: LinearProjectile[], hitbox: SlashHitbox): number {
+function checkSlashHitsOnPool(pool: LinearProjectile[], hitbox: SlashHitbox, onHit: (x: number, y: number) => void): number {
   let hits = 0;
   for (const projectile of pool) {
     if (!projectile.active) {
       continue;
     }
     if (isWithinSlashArc(projectile, hitbox)) {
+      onHit(projectile.x, projectile.y);
       projectile.deactivate();
       hits++;
     }
@@ -122,6 +127,7 @@ function checkContactOnPool(
   playerX: number,
   playerY: number,
   playerRadius: number,
+  onHit: (x: number, y: number) => void,
 ): number {
   let damage = 0;
   for (const projectile of pool) {
@@ -132,6 +138,7 @@ function checkContactOnPool(
     const dy = projectile.y - playerY;
     const minDist = playerRadius + projectile.radius;
     if (dx * dx + dy * dy <= minDist * minDist) {
+      onHit(projectile.x, projectile.y);
       projectile.deactivate();
       damage++;
     }
@@ -145,30 +152,36 @@ function checkContactOnPool(
  * active/visible rather than created or destroyed at runtime.
  *
  * Basic spawns automatically. Zoomer, Stop Wave, and Chaser spawning is
- * currently gated behind debug toggles (see MainScene's number-key
- * handlers) until the wave-based difficulty ramp is built.
+ * gated behind on/off toggles - normally driven by WaveManager as waves
+ * progress, but also directly reachable via MainScene's debug number keys.
  */
 export class ProjectileManager {
+  private readonly scene: Phaser.Scene;
   private readonly arena: ArenaBounds;
 
   private readonly basicPool: BasicProjectile[] = [];
-  private basicSpawnTimerMs = BASIC_SPAWN_INTERVAL_MS;
+  private basicSpawnTimerMs = BASIC_BASE_SPAWN_INTERVAL_MS;
+  private basicSpawningEnabled = true;
 
   private readonly zoomerPool: ZoomerProjectile[] = [];
-  private zoomerSpawnTimerMs = ZOOMER_SPAWN_INTERVAL_MS;
+  private zoomerSpawnTimerMs = ZOOMER_BASE_SPAWN_INTERVAL_MS;
   private zoomerSpawningEnabled = false;
 
   private readonly stopWavePool: StopWaveProjectile[] = [];
-  private stopWaveSpawnTimerMs = STOP_WAVE_SPAWN_INTERVAL_MS;
+  private stopWaveSpawnTimerMs = STOP_WAVE_BASE_SPAWN_INTERVAL_MS;
   private stopWaveSpawningEnabled = false;
 
   private readonly chaserPool: ChaserProjectile[] = [];
-  private chaserSpawnTimerMs = CHASER_SPAWN_INTERVAL_MS;
+  private chaserSpawnTimerMs = CHASER_BASE_SPAWN_INTERVAL_MS;
   private chaserSpawningEnabled = false;
 
   private safeLaneCenterAngleValue = Math.random() * Math.PI * 2;
 
+  /** Multiplies spawn frequency (shorter intervals = more threats) as waves progress. */
+  private difficultyMultiplier = 1;
+
   constructor(scene: Phaser.Scene, arena: ArenaBounds) {
+    this.scene = scene;
     this.arena = arena;
 
     for (let i = 0; i < BASIC_POOL_SIZE; i++) {
@@ -183,6 +196,10 @@ export class ProjectileManager {
     for (let i = 0; i < CHASER_POOL_SIZE; i++) {
       this.chaserPool.push(new ChaserProjectile(scene));
     }
+  }
+
+  get isBasicSpawningEnabled(): boolean {
+    return this.basicSpawningEnabled;
   }
 
   get isZoomerSpawningEnabled(): boolean {
@@ -200,6 +217,13 @@ export class ProjectileManager {
   /** Center angle of the current Safe Lane Volley Rule gap, for the arena's visual indicator. */
   get safeLaneCenterAngle(): number {
     return this.safeLaneCenterAngleValue;
+  }
+
+  setBasicSpawningEnabled(enabled: boolean): void {
+    if (enabled && !this.basicSpawningEnabled) {
+      this.basicSpawnTimerMs = 0;
+    }
+    this.basicSpawningEnabled = enabled;
   }
 
   setZoomerSpawningEnabled(enabled: boolean): void {
@@ -223,19 +247,33 @@ export class ProjectileManager {
     this.chaserSpawningEnabled = enabled;
   }
 
+  /** Scales spawn frequency for every threat type; called by WaveManager as waves progress. */
+  setDifficultyMultiplier(multiplier: number): void {
+    this.difficultyMultiplier = multiplier;
+  }
+
+  /** Immediately deactivates every active projectile of every type - used for the wave intermission's "Breather Window" wipe. */
+  clearAll(): void {
+    for (const projectile of [...this.basicPool, ...this.zoomerPool, ...this.stopWavePool, ...this.chaserPool]) {
+      projectile.deactivate();
+    }
+  }
+
   /** Advances all spawners and active projectiles. Returns how many escaped the arena unhandled (should be scored). */
   update(delta: number, playerX: number, playerY: number): number {
     this.safeLaneCenterAngleValue = Phaser.Math.Angle.Wrap(
       this.safeLaneCenterAngleValue + SAFE_LANE_ROTATION_RADIANS_PER_MS * delta,
     );
 
-    this.basicSpawnTimerMs -= delta;
-    if (this.basicSpawnTimerMs <= 0) {
-      const projectile = findInactive(this.basicPool);
-      if (projectile) {
-        spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
+    if (this.basicSpawningEnabled) {
+      this.basicSpawnTimerMs -= delta;
+      if (this.basicSpawnTimerMs <= 0) {
+        const projectile = findInactive(this.basicPool);
+        if (projectile) {
+          spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
+        }
+        this.basicSpawnTimerMs = BASIC_BASE_SPAWN_INTERVAL_MS / this.difficultyMultiplier;
       }
-      this.basicSpawnTimerMs = BASIC_SPAWN_INTERVAL_MS;
     }
 
     if (this.zoomerSpawningEnabled) {
@@ -245,7 +283,7 @@ export class ProjectileManager {
         if (projectile) {
           spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
         }
-        this.zoomerSpawnTimerMs = ZOOMER_SPAWN_INTERVAL_MS;
+        this.zoomerSpawnTimerMs = ZOOMER_BASE_SPAWN_INTERVAL_MS / this.difficultyMultiplier;
       }
     }
 
@@ -256,7 +294,7 @@ export class ProjectileManager {
         if (projectile) {
           spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
         }
-        this.stopWaveSpawnTimerMs = STOP_WAVE_SPAWN_INTERVAL_MS;
+        this.stopWaveSpawnTimerMs = STOP_WAVE_BASE_SPAWN_INTERVAL_MS / this.difficultyMultiplier;
       }
     }
 
@@ -267,7 +305,7 @@ export class ProjectileManager {
         if (projectile) {
           spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
         }
-        this.chaserSpawnTimerMs = CHASER_SPAWN_INTERVAL_MS;
+        this.chaserSpawnTimerMs = CHASER_BASE_SPAWN_INTERVAL_MS / this.difficultyMultiplier;
       }
     }
 
@@ -284,19 +322,21 @@ export class ProjectileManager {
     if (!hitbox) {
       return 0;
     }
+    const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, SLASH_KILL_POP_COLOR);
     return (
-      checkSlashHitsOnPool(this.basicPool, hitbox) +
-      checkSlashHitsOnPool(this.zoomerPool, hitbox) +
-      checkSlashHitsOnPool(this.chaserPool, hitbox)
+      checkSlashHitsOnPool(this.basicPool, hitbox, onHit) +
+      checkSlashHitsOnPool(this.zoomerPool, hitbox, onHit) +
+      checkSlashHitsOnPool(this.chaserPool, hitbox, onHit)
     );
   }
 
   /** Deactivates any Basic/Zoomer/Chaser projectile touching the player and returns the damage dealt. Only call while the player isn't invincible. */
   checkPlayerCollisions(playerX: number, playerY: number, playerRadius: number): number {
+    const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, HIT_POP_COLOR);
     return (
-      checkContactOnPool(this.basicPool, playerX, playerY, playerRadius) +
-      checkContactOnPool(this.zoomerPool, playerX, playerY, playerRadius) +
-      checkContactOnPool(this.chaserPool, playerX, playerY, playerRadius)
+      checkContactOnPool(this.basicPool, playerX, playerY, playerRadius, onHit) +
+      checkContactOnPool(this.zoomerPool, playerX, playerY, playerRadius, onHit) +
+      checkContactOnPool(this.chaserPool, playerX, playerY, playerRadius, onHit)
     );
   }
 
@@ -306,6 +346,7 @@ export class ProjectileManager {
    * gate it behind that check the way checkPlayerCollisions is gated.
    */
   checkStopWaveCollisions(playerX: number, playerY: number, playerRadius: number): number {
-    return checkContactOnPool(this.stopWavePool, playerX, playerY, playerRadius);
+    const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, HIT_POP_COLOR);
+    return checkContactOnPool(this.stopWavePool, playerX, playerY, playerRadius, onHit);
   }
 }
