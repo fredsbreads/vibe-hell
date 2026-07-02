@@ -12,4 +12,6 @@ export const DualSenseMap = {
   R1: 5,
   L2: 6,
   R2: 7,
+  SHARE: 8,
+  OPTIONS: 9,
 } as const;

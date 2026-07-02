@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { TitleScene } from "./scenes/TitleScene";
 import { MainScene } from "./scenes/MainScene";
 
 new Phaser.Game({
@@ -16,5 +17,5 @@ new Phaser.Game({
   input: {
     gamepad: true,
   },
-  scene: [MainScene],
+  scene: [TitleScene, MainScene],
 });

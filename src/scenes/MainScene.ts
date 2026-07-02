@@ -11,6 +11,10 @@ import { BASIC_PROJECTILE_RADIUS } from "../entities/projectiles/BasicProjectile
 import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjectile";
 import { STOP_WAVE_RADIUS } from "../entities/projectiles/StopWaveProjectile";
 import { CHASER_PROJECTILE_RADIUS } from "../entities/projectiles/ChaserProjectile";
+import { DualSenseMap } from "../input/DualSenseMap";
+import { MenuOverlay } from "../ui/MenuOverlay";
+
+type UiState = "playing" | "paused" | "gameOver";
 
 /** One full rotation every 30s for spinning arena shapes - slow enough to track, per the GDD's "Spin" wave stage. */
 const ARENA_ROTATION_RAD_PER_MS = (Math.PI * 2) / 30000;
@@ -38,12 +42,32 @@ export class MainScene extends Phaser.Scene {
   private waveText!: Phaser.GameObjects.Text;
   private waveBannerText!: Phaser.GameObjects.Text;
 
+  private uiState: UiState = "playing";
+  private menuOverlay!: MenuOverlay;
+  private escKey!: Phaser.Input.Keyboard.Key;
+  private confirmKey!: Phaser.Input.Keyboard.Key;
+  private restartKey!: Phaser.Input.Keyboard.Key;
+  private prevEscHeld = false;
+  private prevConfirmHeld = false;
+  private prevRestartHeld = false;
+
   constructor() {
     super("MainScene");
   }
 
   create(): void {
     const { width, height } = this.scale;
+
+    // Re-assign every run-scoped field explicitly: scene.restart() re-invokes create()
+    // on the SAME instance rather than constructing a fresh one, so field initializers
+    // above only apply to the very first run - anything mutated during play must be
+    // reset here or a "restart" would silently carry over stale state.
+    this.threatsEndured = 0;
+    this.uiState = "playing";
+    this.prevEscHeld = false;
+    this.prevConfirmHeld = false;
+    this.prevRestartHeld = false;
+
     const arenaBounds: ArenaBounds = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
     this.arena = new Arena(arenaBounds, ARENA_SHAPE_CYCLE[this.arenaShapeIndex].build(arenaBounds));
 
@@ -95,10 +119,21 @@ export class MainScene extends Phaser.Scene {
       })
       .setOrigin(1, 1);
 
+    this.menuOverlay = new MenuOverlay(this, width, height);
+    this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.confirmKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+
     this.setupDebugSpawnToggles();
   }
 
   update(_time: number, delta: number): void {
+    this.pollMenuInputs();
+
+    if (this.uiState !== "playing") {
+      return;
+    }
+
     this.player.update(delta);
 
     const escaped = this.projectileManager.update(delta, this.player.sprite.x, this.player.sprite.y);
@@ -133,6 +168,93 @@ export class MainScene extends Phaser.Scene {
     this.updateWaveUi();
     this.redrawArenaOutline();
     this.redrawSafeLane();
+
+    if (this.player.isDead) {
+      this.enterGameOver();
+    }
+  }
+
+  /**
+   * Escape/Options is a context-sensitive "back" button: pauses while
+   * playing, resumes while paused, and returns to the title while dead.
+   * Enter/Cross confirms the primary action (Resume, or Restart on Game
+   * Over); R/Square is a direct Restart shortcut in either menu state.
+   * Polled with edge-detection (like PlayerInput) since Phaser doesn't
+   * expose gamepad button presses as keydown-style events.
+   */
+  private pollMenuInputs(): void {
+    const pad = this.input.gamepad?.pad1;
+
+    const escHeld = this.escKey.isDown || !!pad?.isButtonDown(DualSenseMap.OPTIONS);
+    const escPressed = escHeld && !this.prevEscHeld;
+    this.prevEscHeld = escHeld;
+    if (escPressed) {
+      if (this.uiState === "playing") {
+        this.enterPause();
+      } else if (this.uiState === "paused") {
+        this.exitPause();
+      } else {
+        this.goToMainMenu();
+      }
+    }
+
+    if (this.uiState === "playing") {
+      return;
+    }
+
+    const confirmHeld = this.confirmKey.isDown || !!pad?.isButtonDown(DualSenseMap.CROSS);
+    const confirmPressed = confirmHeld && !this.prevConfirmHeld;
+    this.prevConfirmHeld = confirmHeld;
+    if (confirmPressed) {
+      if (this.uiState === "paused") {
+        this.exitPause();
+      } else if (this.uiState === "gameOver") {
+        this.restartRun();
+      }
+    }
+
+    const restartHeld = this.restartKey.isDown || !!pad?.isButtonDown(DualSenseMap.SQUARE);
+    const restartPressed = restartHeld && !this.prevRestartHeld;
+    this.prevRestartHeld = restartHeld;
+    if (restartPressed) {
+      this.restartRun();
+    }
+  }
+
+  private enterPause(): void {
+    this.uiState = "paused";
+    this.physics.pause();
+    this.tweens.pauseAll();
+    this.menuOverlay.show("PAUSED", "", [
+      { label: "RESUME", onSelect: () => this.exitPause() },
+      { label: "RESTART", onSelect: () => this.restartRun() },
+    ]);
+  }
+
+  private exitPause(): void {
+    this.uiState = "playing";
+    this.physics.resume();
+    this.tweens.resumeAll();
+    this.menuOverlay.hide();
+  }
+
+  private enterGameOver(): void {
+    this.uiState = "gameOver";
+    this.physics.pause();
+    this.tweens.pauseAll();
+    const stats = `Wave ${this.waveManager.currentWave}   Threats Endured: ${this.threatsEndured}`;
+    this.menuOverlay.show("GAME OVER", stats, [
+      { label: "RESTART", onSelect: () => this.restartRun() },
+      { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
+    ]);
+  }
+
+  private restartRun(): void {
+    this.scene.restart();
+  }
+
+  private goToMainMenu(): void {
+    this.scene.start("TitleScene");
   }
 
   /** "WAVE X" + time remaining while active; a "WAVE X COMPLETE" banner during the Breather Window intermission. */
