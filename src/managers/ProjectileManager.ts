@@ -36,7 +36,13 @@ const CHASER_BASE_SPAWN_INTERVAL_MS = 1800;
  */
 export const PLAYER_BLOCK_ARC_RADIANS = Phaser.Math.DegToRad(50);
 export const SAFE_LANE_ARC_RADIANS = Math.PI * 2 * 0.2;
-const SAFE_LANE_ROTATION_RADIANS_PER_MS = (Math.PI * 2) / 20000; // one full sweep every 20s
+
+// The safe lane's sweep speed/direction is re-rolled each wave (see rerollSafeLaneMotion)
+// rather than fixed, so its motion isn't identical wave-to-wave or run-to-run - only the
+// period (how long a full sweep takes) is randomized within this range; it always keeps
+// moving (never 0) so the gap can't degenerate into a static, campable spot.
+const SAFE_LANE_MIN_PERIOD_MS = 14000;
+const SAFE_LANE_MAX_PERIOD_MS = 28000;
 const MAX_SPAWN_ANGLE_ATTEMPTS = 30;
 
 function angularDistance(a: number, b: number): number {
@@ -175,6 +181,7 @@ export class ProjectileManager {
   private chaserSpawningEnabled = false;
 
   private safeLaneCenterAngleValue = Math.random() * Math.PI * 2;
+  private safeLaneRotationRadPerMs = (Math.PI * 2) / SAFE_LANE_MIN_PERIOD_MS;
 
   /** Multiplies spawn frequency (shorter intervals = more threats) as waves progress. */
   private difficultyMultiplier = 1;
@@ -251,6 +258,18 @@ export class ProjectileManager {
     this.difficultyMultiplier = multiplier;
   }
 
+  /**
+   * Picks a new random sweep speed and direction for the Safe Lane, so its
+   * motion isn't identical wave-to-wave or run-to-run. Called by WaveManager
+   * at the start of every wave. Only rerolls speed/direction, not the
+   * lane's current position, so it doesn't visibly jump when this fires.
+   */
+  rerollSafeLaneMotion(): void {
+    const periodMs = SAFE_LANE_MIN_PERIOD_MS + Math.random() * (SAFE_LANE_MAX_PERIOD_MS - SAFE_LANE_MIN_PERIOD_MS);
+    const direction = Math.random() < 0.5 ? -1 : 1;
+    this.safeLaneRotationRadPerMs = (direction * Math.PI * 2) / periodMs;
+  }
+
   /** Immediately deactivates every active projectile of every type - used for the wave intermission's "Breather Window" wipe. */
   clearAll(): void {
     for (const projectile of [...this.basicPool, ...this.zoomerPool, ...this.stopWavePool, ...this.chaserPool]) {
@@ -263,7 +282,7 @@ export class ProjectileManager {
     this.arena.update(delta);
 
     this.safeLaneCenterAngleValue = Phaser.Math.Angle.Wrap(
-      this.safeLaneCenterAngleValue + SAFE_LANE_ROTATION_RADIANS_PER_MS * delta,
+      this.safeLaneCenterAngleValue + this.safeLaneRotationRadPerMs * delta,
     );
 
     if (this.basicSpawningEnabled) {

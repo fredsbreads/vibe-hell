@@ -81,5 +81,9 @@ export class WaveManager {
     this.projectileManager.setZoomerSpawningEnabled(this.wave >= ZOOMER_INTRODUCED_AT_WAVE);
     this.projectileManager.setChaserSpawningEnabled(this.wave >= CHASER_INTRODUCED_AT_WAVE);
     this.projectileManager.setStopWaveSpawningEnabled(this.wave >= STOP_WAVE_INTRODUCED_AT_WAVE);
+
+    // Re-randomize the Safe Lane's sweep speed/direction every wave, so its motion
+    // isn't identical wave-to-wave or run-to-run.
+    this.projectileManager.rerollSafeLaneMotion();
   }
 }
