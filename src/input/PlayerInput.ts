@@ -21,8 +21,9 @@ function applyDeadzone(value: number, deadzone: number): number {
 /**
  * Reads Left Stick / Right Stick / L2 / R2 / Cross / R1 from a connected
  * DualSense (via Phaser's Gamepad plugin, W3C Standard mapping). Falls back
- * to WASD + mouse aim + Space/J so the game is playable and testable in this
- * environment without physical controller hardware attached to the browser.
+ * to WASD + mouse aim + Space/J (and left-click/right-click as slash/dash
+ * aliases) so the game is playable and testable in this environment without
+ * physical controller hardware attached to the browser.
  */
 export class PlayerInput {
   private readonly scene: Phaser.Scene;
@@ -43,6 +44,9 @@ export class PlayerInput {
       dash: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
       slash: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J),
     };
+
+    // Right-click doubles as dash, so stop it from popping the browser's context menu.
+    scene.input.mouse?.disableContextMenu();
   }
 
   private get pad(): Phaser.Input.Gamepad.Gamepad | undefined {
@@ -86,8 +90,9 @@ export class PlayerInput {
       moveY = ky;
     }
 
+    const pointer = this.scene.input.activePointer;
+
     if (!aimed) {
-      const pointer = this.scene.input.activePointer;
       const dx = pointer.worldX - playerX;
       const dy = pointer.worldY - playerY;
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
@@ -95,8 +100,8 @@ export class PlayerInput {
       }
     }
 
-    dashHeld = dashHeld || this.keys.dash.isDown;
-    slashHeld = slashHeld || this.keys.slash.isDown;
+    dashHeld = dashHeld || this.keys.dash.isDown || pointer.rightButtonDown();
+    slashHeld = slashHeld || this.keys.slash.isDown || pointer.leftButtonDown();
 
     const dashPressed = dashHeld && !this.prevDashHeld;
     const slashPressed = slashHeld && !this.prevSlashHeld;
