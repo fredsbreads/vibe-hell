@@ -30,12 +30,12 @@ const CHASER_BASE_SPAWN_INTERVAL_MS = 1800;
  * - Dynamic Perimeter Filtering: a zone centered on the perimeter point
  *   closest to the player (i.e. the angle from the arena center through the
  *   player), blocking point-blank spawns.
- * - Safe Lane Volley Rule: a contiguous 30% arc of the perimeter, which
+ * - Safe Lane Volley Rule: a contiguous 20% arc of the perimeter, which
  *   slowly sweeps around the arena over time, guaranteeing a lane the player
  *   can always see and move into rather than a static/campable gap.
  */
 export const PLAYER_BLOCK_ARC_RADIANS = Phaser.Math.DegToRad(50);
-export const SAFE_LANE_ARC_RADIANS = Math.PI * 2 * 0.3;
+export const SAFE_LANE_ARC_RADIANS = Math.PI * 2 * 0.2;
 const SAFE_LANE_ROTATION_RADIANS_PER_MS = (Math.PI * 2) / 20000; // one full sweep every 20s
 const MAX_SPAWN_ANGLE_ATTEMPTS = 30;
 

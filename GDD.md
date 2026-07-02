@@ -64,7 +64,7 @@ To ensure the game loop remains 100% skill-winnable, the perimeter spawner algor
 
 1. **Perimeter Only:** All projectiles spawn strictly at the absolute boundary lines of the stadium. Projectiles never materialize inside the playable field.
 2. **Dynamic Perimeter Filtering:** The spawner checks the player's real-time 2D coordinates. It temporarily disables spawning points on the perimeter nodes closest to the player, eliminating unreactable point-blank spawns.
-3. **The Safe Lane Volley Rule:** Projectiles spawn in rhythmic bursts/volleys. Every volley must programmatically leave an interconnected 30% gap of empty nodes on the perimeter, guaranteeing a physical lane for the player to see, track, and position into.
+3. **The Safe Lane Volley Rule:** Projectiles spawn in rhythmic bursts/volleys. Every volley must programmatically leave an interconnected 20% gap of empty nodes on the perimeter, guaranteeing a physical lane for the player to see, track, and position into.
 
 ## 5. Wave Loop & Progression Math
 
