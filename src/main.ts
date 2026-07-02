@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { PlaceholderScene } from "./scenes/PlaceholderScene";
+import { MainScene } from "./scenes/MainScene";
 
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -7,5 +7,14 @@ new Phaser.Game({
   width: 800,
   height: 800,
   backgroundColor: "#101014",
-  scene: [PlaceholderScene],
+  physics: {
+    default: "arcade",
+    arcade: {
+      debug: false,
+    },
+  },
+  input: {
+    gamepad: true,
+  },
+  scene: [MainScene],
 });
