@@ -20,7 +20,9 @@ export class ChaserProjectile extends LinearProjectile {
   }
 
   step(delta: number, arena: ArenaBounds, playerX: number, playerY: number): boolean {
-    this.move(delta);
+    if (!this.move(delta)) {
+      return false;
+    }
 
     const dx = this.x - arena.centerX;
     const dy = this.y - arena.centerY;

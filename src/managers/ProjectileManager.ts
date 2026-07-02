@@ -19,6 +19,39 @@ const STOP_WAVE_SPAWN_INTERVAL_MS = 2500;
 const CHASER_POOL_SIZE = 60;
 const CHASER_SPAWN_INTERVAL_MS = 1800;
 
+/**
+ * Fair-Play Spawner Rules (GDD section 4). Two exclusion zones are carved out
+ * of the perimeter and a spawn angle is rejection-sampled from what's left:
+ *
+ * - Dynamic Perimeter Filtering: a zone centered on the perimeter point
+ *   closest to the player (i.e. the angle from the arena center through the
+ *   player), blocking point-blank spawns.
+ * - Safe Lane Volley Rule: a contiguous 30% arc of the perimeter, which
+ *   slowly sweeps around the arena over time, guaranteeing a lane the player
+ *   can always see and move into rather than a static/campable gap.
+ */
+export const PLAYER_BLOCK_ARC_RADIANS = Phaser.Math.DegToRad(50);
+export const SAFE_LANE_ARC_RADIANS = Math.PI * 2 * 0.3;
+const SAFE_LANE_ROTATION_RADIANS_PER_MS = (Math.PI * 2) / 20000; // one full sweep every 20s
+const MAX_SPAWN_ANGLE_ATTEMPTS = 30;
+
+function angularDistance(a: number, b: number): number {
+  return Math.abs(Phaser.Math.Angle.Wrap(a - b));
+}
+
+/** Rejection-samples a perimeter angle outside both exclusion zones. Falls back to directly opposite the player if it can't find one. */
+function pickSafeSpawnAngle(playerAngle: number, safeLaneCenterAngle: number): number {
+  for (let attempt = 0; attempt < MAX_SPAWN_ANGLE_ATTEMPTS; attempt++) {
+    const candidate = Math.random() * Math.PI * 2;
+    const blockedByPlayer = angularDistance(candidate, playerAngle) <= PLAYER_BLOCK_ARC_RADIANS / 2;
+    const blockedBySafeLane = angularDistance(candidate, safeLaneCenterAngle) <= SAFE_LANE_ARC_RADIANS / 2;
+    if (!blockedByPlayer && !blockedBySafeLane) {
+      return candidate;
+    }
+  }
+  return playerAngle + Math.PI;
+}
+
 function isWithinSlashArc(projectile: LinearProjectile, hitbox: SlashHitbox): boolean {
   const dx = projectile.x - hitbox.x;
   const dy = projectile.y - hitbox.y;
@@ -41,8 +74,10 @@ function spawnOnPerimeter(
   arena: ArenaBounds,
   playerX: number,
   playerY: number,
+  safeLaneCenterAngle: number,
 ): void {
-  const angle = Math.random() * Math.PI * 2;
+  const playerAngle = Math.atan2(playerY - arena.centerY, playerX - arena.centerX);
+  const angle = pickSafeSpawnAngle(playerAngle, safeLaneCenterAngle);
   const spawnX = arena.centerX + Math.cos(angle) * arena.radius;
   const spawnY = arena.centerY + Math.sin(angle) * arena.radius;
   projectile.activate(spawnX, spawnY, playerX, playerY);
@@ -131,6 +166,8 @@ export class ProjectileManager {
   private chaserSpawnTimerMs = CHASER_SPAWN_INTERVAL_MS;
   private chaserSpawningEnabled = false;
 
+  private safeLaneCenterAngleValue = Math.random() * Math.PI * 2;
+
   constructor(scene: Phaser.Scene, arena: ArenaBounds) {
     this.arena = arena;
 
@@ -160,6 +197,11 @@ export class ProjectileManager {
     return this.chaserSpawningEnabled;
   }
 
+  /** Center angle of the current Safe Lane Volley Rule gap, for the arena's visual indicator. */
+  get safeLaneCenterAngle(): number {
+    return this.safeLaneCenterAngleValue;
+  }
+
   setZoomerSpawningEnabled(enabled: boolean): void {
     if (enabled && !this.zoomerSpawningEnabled) {
       this.zoomerSpawnTimerMs = 0;
@@ -183,11 +225,15 @@ export class ProjectileManager {
 
   /** Advances all spawners and active projectiles. Returns how many escaped the arena unhandled (should be scored). */
   update(delta: number, playerX: number, playerY: number): number {
+    this.safeLaneCenterAngleValue = Phaser.Math.Angle.Wrap(
+      this.safeLaneCenterAngleValue + SAFE_LANE_ROTATION_RADIANS_PER_MS * delta,
+    );
+
     this.basicSpawnTimerMs -= delta;
     if (this.basicSpawnTimerMs <= 0) {
       const projectile = findInactive(this.basicPool);
       if (projectile) {
-        spawnOnPerimeter(projectile, this.arena, playerX, playerY);
+        spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
       }
       this.basicSpawnTimerMs = BASIC_SPAWN_INTERVAL_MS;
     }
@@ -197,7 +243,7 @@ export class ProjectileManager {
       if (this.zoomerSpawnTimerMs <= 0) {
         const projectile = findInactive(this.zoomerPool);
         if (projectile) {
-          spawnOnPerimeter(projectile, this.arena, playerX, playerY);
+          spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
         }
         this.zoomerSpawnTimerMs = ZOOMER_SPAWN_INTERVAL_MS;
       }
@@ -208,7 +254,7 @@ export class ProjectileManager {
       if (this.stopWaveSpawnTimerMs <= 0) {
         const projectile = findInactive(this.stopWavePool);
         if (projectile) {
-          spawnOnPerimeter(projectile, this.arena, playerX, playerY);
+          spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
         }
         this.stopWaveSpawnTimerMs = STOP_WAVE_SPAWN_INTERVAL_MS;
       }
@@ -219,7 +265,7 @@ export class ProjectileManager {
       if (this.chaserSpawnTimerMs <= 0) {
         const projectile = findInactive(this.chaserPool);
         if (projectile) {
-          spawnOnPerimeter(projectile, this.arena, playerX, playerY);
+          spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
         }
         this.chaserSpawnTimerMs = CHASER_SPAWN_INTERVAL_MS;
       }

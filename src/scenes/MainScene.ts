@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { Player } from "../entities/Player";
-import { ProjectileManager } from "../managers/ProjectileManager";
+import { ProjectileManager, SAFE_LANE_ARC_RADIANS } from "../managers/ProjectileManager";
 import { ArenaBounds, ARENA_RADIUS } from "../config/arena";
 import { BASIC_PROJECTILE_RADIUS } from "../entities/projectiles/BasicProjectile";
 import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjectile";
@@ -15,6 +15,7 @@ export class MainScene extends Phaser.Scene {
   private threatsEndured = 0;
   private threatsText!: Phaser.GameObjects.Text;
   private debugText!: Phaser.GameObjects.Text;
+  private safeLaneGraphic!: Phaser.GameObjects.Graphics;
 
   constructor() {
     super("MainScene");
@@ -33,6 +34,8 @@ export class MainScene extends Phaser.Scene {
     this.add
       .circle(this.arena.centerX, this.arena.centerY, this.arena.radius, 0x1a1a2e)
       .setStrokeStyle(4, 0x4a4a6a);
+
+    this.safeLaneGraphic = this.add.graphics();
 
     this.player = new Player(this, this.arena.centerX, this.arena.centerY, this.arena);
     this.projectileManager = new ProjectileManager(this, this.arena);
@@ -87,6 +90,19 @@ export class MainScene extends Phaser.Scene {
 
     this.threatsText.setText(`THREATS ENDURED: ${this.threatsEndured}`);
     this.updateDebugText();
+    this.redrawSafeLane();
+  }
+
+  /** Renders the Safe Lane Volley Rule's guaranteed-empty arc on the arena wall, so it's an actual visible lane, not just an internal rule. */
+  private redrawSafeLane(): void {
+    const center = this.projectileManager.safeLaneCenterAngle;
+    const half = SAFE_LANE_ARC_RADIANS / 2;
+
+    this.safeLaneGraphic.clear();
+    this.safeLaneGraphic.lineStyle(6, 0x59f2c8, 0.3);
+    this.safeLaneGraphic.beginPath();
+    this.safeLaneGraphic.arc(this.arena.centerX, this.arena.centerY, this.arena.radius, center - half, center + half);
+    this.safeLaneGraphic.strokePath();
   }
 
   /** Debug-only: number keys manually toggle each threat type's spawning on and off for isolated verification. */

@@ -17,7 +17,9 @@ export class ZoomerProjectile extends LinearProjectile {
   }
 
   step(delta: number, arena: ArenaBounds, _playerX: number, _playerY: number): boolean {
-    this.move(delta);
+    if (!this.move(delta)) {
+      return false;
+    }
     return this.hasEscaped(arena);
   }
 }

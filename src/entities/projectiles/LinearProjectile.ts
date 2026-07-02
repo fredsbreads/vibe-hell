@@ -4,6 +4,10 @@ import { ArenaBounds } from "../../config/arena";
 /** How far past the arena wall a projectile must drift before it's considered escaped. */
 const ESCAPE_MARGIN = 80;
 
+/** How long a projectile sits still at its spawn point, telegraphing its arrival, before it starts moving. */
+const SPAWN_TELEGRAPH_MS = 400;
+const TELEGRAPH_START_ALPHA = 0.35;
+
 /**
  * Shared base for pooled projectiles that aim at the player once on spawn
  * and travel in a straight line (no wall bounce). Subclasses just supply a
@@ -16,6 +20,7 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   protected readonly speed: number;
   protected vx = 0;
   protected vy = 0;
+  protected telegraphRemainingMs = 0;
 
   constructor(scene: Phaser.Scene, textureKey: string, speed: number, radius: number) {
     super(scene, 0, 0, textureKey);
@@ -31,6 +36,8 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     const angle = Math.atan2(targetY - y, targetX - x);
     this.vx = Math.cos(angle) * this.speed;
     this.vy = Math.sin(angle) * this.speed;
+    this.telegraphRemainingMs = SPAWN_TELEGRAPH_MS;
+    this.setAlpha(TELEGRAPH_START_ALPHA);
     this.setActive(true);
     this.setVisible(true);
   }
@@ -40,10 +47,24 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     this.setVisible(false);
   }
 
-  protected move(delta: number): void {
+  /**
+   * Advances the telegraph timer and fades the sprite in while it's still
+   * telegraphing; otherwise moves it along its velocity. Returns false while
+   * still telegraphing (hasn't started moving yet), so subclasses know to
+   * skip bounce/escape checks for this step.
+   */
+  protected move(delta: number): boolean {
+    if (this.telegraphRemainingMs > 0) {
+      this.telegraphRemainingMs = Math.max(0, this.telegraphRemainingMs - delta);
+      const progress = 1 - this.telegraphRemainingMs / SPAWN_TELEGRAPH_MS;
+      this.setAlpha(TELEGRAPH_START_ALPHA + (1 - TELEGRAPH_START_ALPHA) * progress);
+      return false;
+    }
+
     const dt = delta / 1000;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
+    return true;
   }
 
   protected hasEscaped(arena: ArenaBounds): boolean {
