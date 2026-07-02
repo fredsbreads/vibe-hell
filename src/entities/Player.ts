@@ -13,7 +13,19 @@ const SLASH_COOLDOWN_MS = 500;
 const SLASH_RANGE = 60;
 const SLASH_ARC_WIDTH = 0.9;
 
+const STARTING_HP = 3;
+
+export interface SlashHitbox {
+  x: number;
+  y: number;
+  angle: number;
+  range: number;
+  arcWidth: number;
+}
+
 export class Player {
+  static readonly RADIUS = 16;
+
   readonly sprite: Phaser.Physics.Arcade.Sprite;
 
   aimAngle = -Math.PI / 2;
@@ -28,14 +40,17 @@ export class Player {
   private dashTimeRemainingMs = 0;
   private dashLockoutRemainingMs = 0;
 
+  private slashAngle = 0;
   private slashActiveRemainingMs = 0;
   private slashCooldownRemainingMs = 0;
+
+  private hp = STARTING_HP;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     this.input = new PlayerInput(scene);
 
     this.sprite = scene.physics.add.sprite(x, y, "player");
-    this.sprite.setCircle(16);
+    this.sprite.setCircle(Player.RADIUS);
 
     this.aimIndicator = scene.add.graphics();
     this.slashGraphic = scene.add.graphics();
@@ -75,6 +90,32 @@ export class Player {
     this.redrawStatusText();
   }
 
+  get currentHp(): number {
+    return this.hp;
+  }
+
+  get isDead(): boolean {
+    return this.hp <= 0;
+  }
+
+  takeDamage(amount: number): void {
+    this.hp = Math.max(0, this.hp - amount);
+  }
+
+  /** The active slash hit-region for this frame, or null if the slash isn't currently active. */
+  getActiveSlashHitbox(): SlashHitbox | null {
+    if (this.slashActiveRemainingMs <= 0) {
+      return null;
+    }
+    return {
+      x: this.sprite.x,
+      y: this.sprite.y,
+      angle: this.slashAngle,
+      range: SLASH_RANGE,
+      arcWidth: SLASH_ARC_WIDTH,
+    };
+  }
+
   private canDash(): boolean {
     return this.dashLockoutRemainingMs <= 0;
   }
@@ -109,6 +150,7 @@ export class Player {
   }
 
   private startSlash(angle: number): void {
+    this.slashAngle = angle;
     this.slashActiveRemainingMs = SLASH_DURATION_MS;
     this.slashCooldownRemainingMs = SLASH_COOLDOWN_MS;
 
@@ -159,6 +201,7 @@ export class Player {
     const slashLabel = this.canSlash()
       ? "SLASH: READY"
       : `SLASH: ${(this.slashCooldownRemainingMs / 1000).toFixed(1)}s`;
-    this.statusText.setText(`${dashLabel}\n${slashLabel}`);
+    const hpLabel = `HP: ${"♥".repeat(this.hp)}${"♡".repeat(STARTING_HP - this.hp)}`;
+    this.statusText.setText(`${dashLabel}\n${slashLabel}\n${hpLabel}`);
   }
 }
