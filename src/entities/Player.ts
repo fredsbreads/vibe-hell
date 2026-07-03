@@ -11,8 +11,8 @@ const HURT_SHAKE_INTENSITY = 0.008;
 const MOVE_SPEED = 320;
 
 const DASH_SPEED = 900;
-const DASH_DURATION_MS = 150;
-const DASH_COOLDOWN_MS = 200;
+const DASH_DURATION_MS = 220; // i-frame window - was 150ms, felt too punishing
+const DASH_COOLDOWN_MS = 130; // post-dash-only buffer - trimmed to keep total lockout roughly unchanged
 const DASH_LOCKOUT_MS = DASH_DURATION_MS + DASH_COOLDOWN_MS;
 
 const SLASH_DURATION_MS = 120;
