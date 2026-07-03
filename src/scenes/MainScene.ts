@@ -231,31 +231,12 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    if (this.uiState === "playing") {
-      // Covers the same frame a pause/menu action just resumed play (e.g. ESC while
-      // mid-hold on R) - without this, a partial hold's progress text could keep
-      // showing on screen after leaving the pause menu, since restartHoldText isn't
-      // owned by MenuOverlay and wouldn't get cleared by menuOverlay.hide().
-      this.restartHoldMs = 0;
-      this.restartHoldText.setText("");
-      return;
-    }
-
-    const confirmHeld = this.confirmKey.isDown || !!pad?.isButtonDown(DualSenseMap.CROSS);
-    const confirmPressed = confirmHeld && !this.prevConfirmHeld;
-    this.prevConfirmHeld = confirmHeld;
-    if (confirmPressed) {
-      if (this.uiState === "paused") {
-        this.exitPause();
-      } else if (this.uiState === "gameOver") {
-        this.restartRun();
-      }
-    }
-
     // Restart discards the current run, so it requires a brief hold rather than an
     // instant tap - a stray/reflexive press of R (or Square) shouldn't be able to
-    // wipe out progress. this.restartHoldText shows the hold building up so it
-    // reads as a deliberate confirm gesture instead of the key just not working.
+    // wipe out progress. Works in every uiState (mid-run included, not just paused/
+    // game-over) so you can bail out and restart without pausing first.
+    // restartHoldText shows the hold building up so it reads as a deliberate confirm
+    // gesture instead of the key just not working.
     const restartHeld = this.restartKey.isDown || !!pad?.isButtonDown(DualSenseMap.SQUARE);
     if (restartHeld) {
       this.restartHoldMs += delta;
@@ -270,6 +251,21 @@ export class MainScene extends Phaser.Scene {
     } else {
       this.restartHoldMs = 0;
       this.restartHoldText.setText("");
+    }
+
+    if (this.uiState === "playing") {
+      return;
+    }
+
+    const confirmHeld = this.confirmKey.isDown || !!pad?.isButtonDown(DualSenseMap.CROSS);
+    const confirmPressed = confirmHeld && !this.prevConfirmHeld;
+    this.prevConfirmHeld = confirmHeld;
+    if (confirmPressed) {
+      if (this.uiState === "paused") {
+        this.exitPause();
+      } else if (this.uiState === "gameOver") {
+        this.restartRun();
+      }
     }
 
     const mainMenuHeld = this.mainMenuKey.isDown || !!pad?.isButtonDown(DualSenseMap.TRIANGLE);
