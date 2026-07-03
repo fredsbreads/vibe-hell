@@ -74,6 +74,12 @@ export class Player {
 
     this.sprite = scene.physics.add.sprite(x, y, "player");
     this.sprite.setCircle(Player.RADIUS);
+    // Explicit depth, not just creation order: with no depth set, Phaser draws by
+    // display-list insertion order, and projectiles are added after the player (see
+    // MainScene.create()) - so without this, any projectile overlapping the player
+    // (a Stop Wave sitting on top of you, most visibly) would render over it and
+    // hide it from view.
+    this.sprite.setDepth(5);
 
     this.aimIndicator = scene.add.graphics();
     this.slashGraphic = scene.add.graphics();
