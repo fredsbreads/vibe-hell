@@ -361,9 +361,9 @@ export class ProjectileManager {
   }
 
   /**
-   * Stop Waves bypass dash invincibility entirely, so this must be called
-   * unconditionally every frame regardless of player.isInvincible - never
-   * gate it behind that check the way checkPlayerCollisions is gated.
+   * Stop Waves are a dash-specific hard counter, not a general obstacle: only call
+   * this while the player is dashing (see MainScene) - contact made while not
+   * dashing should have no effect at all, not even a normal (non-invincible) hit.
    */
   checkStopWaveCollisions(playerX: number, playerY: number, playerRadius: number): number {
     const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, HIT_POP_COLOR);

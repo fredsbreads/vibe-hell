@@ -183,14 +183,18 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // Stop Waves are a hard counter: checked unconditionally, bypassing dash i-frames.
-    const stopWaveHits = this.projectileManager.checkStopWaveCollisions(
-      this.player.sprite.x,
-      this.player.sprite.y,
-      Player.RADIUS,
-    );
-    if (stopWaveHits > 0) {
-      this.player.interruptDashAndDamage(stopWaveHits);
+    // Stop Waves only punish dashing into them - contact while not dashing (even
+    // outside dash i-frames) has no effect, so this is gated behind isDashActive
+    // rather than checked unconditionally.
+    if (this.player.isDashActive) {
+      const stopWaveHits = this.projectileManager.checkStopWaveCollisions(
+        this.player.sprite.x,
+        this.player.sprite.y,
+        Player.RADIUS,
+      );
+      if (stopWaveHits > 0) {
+        this.player.interruptDashAndDamage(stopWaveHits);
+      }
     }
 
     this.waveManager.update(delta);

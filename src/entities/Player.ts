@@ -130,13 +130,22 @@ export class Player {
     return this.isDashing || this.hitGraceRemainingMs > 0;
   }
 
+  /** Whether a dash is currently active - Stop Waves only punish contact made while dashing through one. */
+  get isDashActive(): boolean {
+    return this.isDashing;
+  }
+
   takeDamage(amount: number): void {
     this.hp = Math.max(0, this.hp - amount);
     this.hitGraceRemainingMs = HIT_INVINCIBILITY_MS;
     this.playHurtEffect();
   }
 
-  /** Hard counter for Stop Waves: cancels any active dash, strips i-frames, and deals damage, bypassing normal invincibility. */
+  /**
+   * Punishes dashing into a Stop Wave: cancels the dash, strips i-frames, and deals
+   * damage, bypassing normal invincibility. Only ever called while isDashActive is
+   * true (see MainScene) - walking into a Stop Wave without dashing does nothing.
+   */
   interruptDashAndDamage(amount: number): void {
     this.isDashing = false;
     this.dashTimeRemainingMs = 0;

@@ -7,9 +7,12 @@ export const STOP_WAVE_RADIUS = 40;
 
 /**
  * A pooled Stop Wave threat: a large, slow barrier. Per the GDD it is a hard
- * counter to both of the player's tools - immune to Slash, and it bypasses
- * Dash i-frames entirely (see ProjectileManager.checkStopWaveCollisions,
- * which is checked separately from the other threat types for this reason).
+ * counter to Dash specifically - immune to Slash, and it punishes dashing
+ * through it by cancelling the dash and dealing damage even though dash
+ * would normally grant i-frames. It only reacts to contact made while
+ * dashing; simply walking into one does nothing (see
+ * ProjectileManager.checkStopWaveCollisions, which is checked separately
+ * from the other threat types and gated behind Player.isDashActive).
  */
 export class StopWaveProjectile extends LinearProjectile {
   constructor(scene: Phaser.Scene) {
