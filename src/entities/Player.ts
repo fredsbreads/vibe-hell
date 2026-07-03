@@ -286,7 +286,16 @@ export class Player {
     const angle = Math.atan2(dy, dx);
     const maxDist = this.arena.maxRadiusAtAngle(angle) - Player.RADIUS;
 
-    if (dist > maxDist) {
+    // >= (not just >) matters here: once a prior frame has already snapped the
+    // player exactly onto the boundary, dist sits at precisely maxDist. update()
+    // unconditionally overwrites velocity from raw input before this runs, so if
+    // we only trimmed velocity while strictly past the boundary, a player holding
+    // straight into the wall would get one full frame of un-trimmed outward
+    // velocity through to the physics step, overshoot, get snapped back next
+    // frame, then repeat - a constant push-out/snap-back cycle that reads as
+    // bouncy/jittery instead of a smooth slide. Trimming at dist === maxDist too
+    // kills the outward component before it ever reaches the physics engine.
+    if (dist >= maxDist) {
       const scale = maxDist / dist;
       const clampedX = this.arena.bounds.centerX + dx * scale;
       const clampedY = this.arena.bounds.centerY + dy * scale;
