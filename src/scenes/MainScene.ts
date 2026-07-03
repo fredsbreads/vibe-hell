@@ -19,6 +19,9 @@ type UiState = "playing" | "paused" | "gameOver";
 /** One full rotation every 30s for spinning arena shapes - slow enough to track, per the GDD's "Spin" wave stage. */
 const ARENA_ROTATION_RAD_PER_MS = (Math.PI * 2) / 30000;
 
+/** How long R (or gamepad Square) must be held while paused/game-over before it triggers a restart. */
+const RESTART_HOLD_DURATION_MS = 500;
+
 /** Debug-cyclable arena shapes (key 4), demonstrating the shape abstraction beyond the default circle. */
 const ARENA_SHAPE_CYCLE: Array<{ label: string; build: (bounds: ArenaBounds) => ArenaShape }> = [
   { label: "Circle", build: (bounds) => new CircleArena(bounds) },
@@ -55,8 +58,9 @@ export class MainScene extends Phaser.Scene {
   private mainMenuKey!: Phaser.Input.Keyboard.Key;
   private prevEscHeld = false;
   private prevConfirmHeld = false;
-  private prevRestartHeld = false;
   private prevMainMenuHeld = false;
+  private restartHoldMs = 0;
+  private restartHoldText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("MainScene");
@@ -73,8 +77,8 @@ export class MainScene extends Phaser.Scene {
     this.uiState = "playing";
     this.prevEscHeld = false;
     this.prevConfirmHeld = false;
-    this.prevRestartHeld = false;
     this.prevMainMenuHeld = false;
+    this.restartHoldMs = 0;
     // Restart passes { startWave: this.startWave } explicitly (see restartRun) so a
     // jumped-to wave survives a restart; falls back to 1 if launched with no data at all.
     if (data?.startWave !== undefined) {
@@ -133,6 +137,15 @@ export class MainScene extends Phaser.Scene {
       .setOrigin(1, 1);
 
     this.menuOverlay = new MenuOverlay(this, width, height);
+    this.restartHoldText = this.add
+      .text(width / 2, height - 90, "", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        color: "#ffe98a",
+        align: "center",
+      })
+      .setOrigin(0.5)
+      .setDepth(21);
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.confirmKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
@@ -142,7 +155,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    this.pollMenuInputs();
+    this.pollMenuInputs(delta);
     this.menuOverlay.update();
 
     if (this.uiState !== "playing") {
@@ -197,7 +210,7 @@ export class MainScene extends Phaser.Scene {
    * Polled with edge-detection (like PlayerInput) since Phaser doesn't
    * expose gamepad button presses as keydown-style events.
    */
-  private pollMenuInputs(): void {
+  private pollMenuInputs(delta: number): void {
     const pad = this.input.gamepad?.pad1;
 
     const escHeld = this.escKey.isDown || !!pad?.isButtonDown(DualSenseMap.OPTIONS);
@@ -214,6 +227,12 @@ export class MainScene extends Phaser.Scene {
     }
 
     if (this.uiState === "playing") {
+      // Covers the same frame a pause/menu action just resumed play (e.g. ESC while
+      // mid-hold on R) - without this, a partial hold's progress text could keep
+      // showing on screen after leaving the pause menu, since restartHoldText isn't
+      // owned by MenuOverlay and wouldn't get cleared by menuOverlay.hide().
+      this.restartHoldMs = 0;
+      this.restartHoldText.setText("");
       return;
     }
 
@@ -228,11 +247,24 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    // Restart discards the current run, so it requires a brief hold rather than an
+    // instant tap - a stray/reflexive press of R (or Square) shouldn't be able to
+    // wipe out progress. this.restartHoldText shows the hold building up so it
+    // reads as a deliberate confirm gesture instead of the key just not working.
     const restartHeld = this.restartKey.isDown || !!pad?.isButtonDown(DualSenseMap.SQUARE);
-    const restartPressed = restartHeld && !this.prevRestartHeld;
-    this.prevRestartHeld = restartHeld;
-    if (restartPressed) {
-      this.restartRun();
+    if (restartHeld) {
+      this.restartHoldMs += delta;
+      if (this.restartHoldMs >= RESTART_HOLD_DURATION_MS) {
+        this.restartHoldMs = 0;
+        this.restartHoldText.setText("");
+        this.restartRun();
+        return;
+      }
+      const pct = Math.min(100, Math.round((this.restartHoldMs / RESTART_HOLD_DURATION_MS) * 100));
+      this.restartHoldText.setText(`HOLD R TO RESTART... ${pct}%`);
+    } else {
+      this.restartHoldMs = 0;
+      this.restartHoldText.setText("");
     }
 
     const mainMenuHeld = this.mainMenuKey.isDown || !!pad?.isButtonDown(DualSenseMap.TRIANGLE);
