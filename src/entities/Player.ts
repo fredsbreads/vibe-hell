@@ -10,6 +10,11 @@ const HURT_SHAKE_INTENSITY = 0.008;
 
 const MOVE_SPEED = 320;
 
+// Tolerance for "am I at the wall" checks, absorbing float rounding in the
+// boundary reposition math so a hair-under-maxDist position still counts as
+// "at the wall" instead of letting a frame of unclipped velocity slip through.
+const WALL_EPSILON = 0.5;
+
 const DASH_SPEED = 900;
 const DASH_DURATION_MS = 150;
 const DASH_COOLDOWN_MS = 200;
@@ -305,7 +310,16 @@ export class Player {
 
     const angle = Math.atan2(dy, dx);
     const maxDist = this.arena.maxRadiusAtAngle(angle) - Player.RADIUS;
-    if (dist < maxDist) {
+    // WALL_EPSILON matters: clampToArena's reposition (scale = maxDist / dist)
+    // doesn't land on EXACTLY maxDist - float division rounding can leave the
+    // player a hair under it. With a strict dist < maxDist bail here, that
+    // hair-under position reads as "not at the wall yet" for one frame, so a
+    // full unclipped step of outward velocity leaks through, overshoots,
+    // gets corrected, lands a hair under again, and repeats forever - a
+    // sustained push/snap cycle with near-zero net displacement that plays
+    // as the player being stuck in place. Treating "within half a pixel of
+    // the wall" as "at the wall" closes that gap.
+    if (dist < maxDist - WALL_EPSILON) {
       return;
     }
 
@@ -341,10 +355,22 @@ export class Player {
       const clampedY = this.arena.bounds.centerY + dy * scale;
 
       const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-      // updateFromGameObject() re-syncs the Arcade body's position without
-      // touching velocity, unlike body.reset() which zeroes it entirely.
-      this.sprite.setPosition(clampedX, clampedY);
-      body.updateFromGameObject();
+      // Writing directly to body.position (not sprite.setPosition()) matters here.
+      // Arcade's postUpdate runs AFTER Scene.update() every frame and reconciles the
+      // sprite from the body via gameObject.x += (body.position.x - prevFrame.x) -
+      // an ADDITIVE delta, not an absolute write. If we call sprite.setPosition()
+      // here (mid-frame, before that reconciliation happens) and then sync the body
+      // from it via updateFromGameObject(), postUpdate's delta-based write-back
+      // re-applies that same displacement a second time on top of the sprite we
+      // already moved - a genuine double-count, not float error. That's what was
+      // producing the "touch the wall and get stuck" bug: the position would
+      // overshoot by roughly the size of its own correction, alternate between a
+      // handful of quantized offsets frame to frame, and never converge. Setting
+      // body.position (and re-deriving its center) leaves the sprite's own x/y
+      // untouched so postUpdate's delta is the ONLY write that ever happens.
+      body.position.x = clampedX - body.halfWidth;
+      body.position.y = clampedY - body.halfHeight;
+      body.updateCenter();
 
       const normal = this.arena.normalAtAngle(angle);
       const outwardSpeed = body.velocity.x * normal.x + body.velocity.y * normal.y;

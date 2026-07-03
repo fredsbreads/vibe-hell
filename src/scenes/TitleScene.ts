@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { DualSenseMap } from "../input/DualSenseMap";
+import { getAimMode, toggleAimMode } from "../config/settings";
 
 const MIN_START_WAVE = 1;
 const MAX_START_WAVE = 20;
@@ -17,6 +18,7 @@ export class TitleScene extends Phaser.Scene {
   private started = false;
   private startWave = MIN_START_WAVE;
   private startWaveText!: Phaser.GameObjects.Text;
+  private aimModeText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("TitleScene");
@@ -69,6 +71,7 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.createWaveStepper(width / 2, height / 2 + 170);
+    this.createAimModeToggle(width / 2, height / 2 + 210);
 
     this.input.keyboard!.once("keydown-ENTER", () => this.startGame());
     this.input.keyboard!.once("keydown-SPACE", () => this.startGame());
@@ -122,6 +125,37 @@ export class TitleScene extends Phaser.Scene {
     plusButton.on("pointerdown", () => this.adjustStartWave(1));
 
     this.refreshStartWaveText();
+  }
+
+  /**
+   * Lets aiming be driven by movement direction instead of the right stick /
+   * mouse, so the game can be played with just WASD + Space + J - no mouse or
+   * right stick needed at all once this is switched on. Persisted via
+   * settings.ts so it's remembered on the next visit, not just this session.
+   */
+  private createAimModeToggle(centerX: number, y: number): void {
+    this.aimModeText = this.add
+      .text(centerX, y, "", {
+        fontFamily: "monospace",
+        fontSize: "16px",
+        color: "#59f2c8",
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+
+    this.aimModeText.on("pointerover", () => this.aimModeText.setColor("#ffffff"));
+    this.aimModeText.on("pointerout", () => this.aimModeText.setColor("#59f2c8"));
+    this.aimModeText.on("pointerdown", () => {
+      toggleAimMode();
+      this.refreshAimModeText();
+    });
+
+    this.refreshAimModeText();
+  }
+
+  private refreshAimModeText(): void {
+    const label = getAimMode() === "movement" ? "AIM: MOVEMENT (KEYBOARD-ONLY)" : "AIM: FREE (STICK/MOUSE)";
+    this.aimModeText.setText(`[ ${label} ]`);
   }
 
   private adjustStartWave(delta: number): void {

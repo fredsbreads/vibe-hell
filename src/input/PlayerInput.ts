@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { DualSenseMap } from "./DualSenseMap";
+import { getAimMode } from "../config/settings";
 
 const STICK_DEADZONE = 0.2;
 const TRIGGER_THRESHOLD = 0.5;
@@ -55,6 +56,7 @@ export class PlayerInput {
 
   read(playerX: number, playerY: number): InputState {
     const pad = this.pad;
+    const aimMode = getAimMode();
 
     let moveX = 0;
     let moveY = 0;
@@ -66,10 +68,12 @@ export class PlayerInput {
       moveX = applyDeadzone(pad.leftStick.x, STICK_DEADZONE);
       moveY = applyDeadzone(pad.leftStick.y, STICK_DEADZONE);
 
-      const aimX = applyDeadzone(pad.rightStick.x, STICK_DEADZONE);
-      const aimY = applyDeadzone(pad.rightStick.y, STICK_DEADZONE);
-      if (aimX !== 0 || aimY !== 0) {
-        aimAngle = Math.atan2(aimY, aimX);
+      if (aimMode === "free") {
+        const aimX = applyDeadzone(pad.rightStick.x, STICK_DEADZONE);
+        const aimY = applyDeadzone(pad.rightStick.y, STICK_DEADZONE);
+        if (aimX !== 0 || aimY !== 0) {
+          aimAngle = Math.atan2(aimY, aimX);
+        }
       }
 
       const l2Value = pad.getButtonValue(DualSenseMap.L2);
@@ -90,13 +94,22 @@ export class PlayerInput {
 
     const pointer = this.scene.input.activePointer;
 
-    // Mouse aim is only a fallback for when there's no gamepad at all - if a pad is
-    // connected but its right stick is just resting in the deadzone, we should hold
-    // the last stick-commanded angle (aimAngle already defaults to lastAimAngle
-    // above), not snap to wherever the untouched mouse cursor happens to be. That
-    // fallthrough was what made the aim indicator feel "detached"/delayed: it'd jump
-    // to the mouse position every time the stick eased back toward center.
-    if (!pad) {
+    if (aimMode === "movement") {
+      // Aim wherever you're currently moving instead of needing a separate aim
+      // input - makes the game fully playable with just WASD + Space + J, no
+      // mouse or right stick required. Holds the last direction while stationary
+      // (aimAngle already defaults to lastAimAngle above) rather than aiming
+      // nowhere.
+      if (moveX !== 0 || moveY !== 0) {
+        aimAngle = Math.atan2(moveY, moveX);
+      }
+    } else if (!pad) {
+      // Mouse aim is only a fallback for when there's no gamepad at all - if a pad is
+      // connected but its right stick is just resting in the deadzone, we should hold
+      // the last stick-commanded angle (aimAngle already defaults to lastAimAngle
+      // above), not snap to wherever the untouched mouse cursor happens to be. That
+      // fallthrough was what made the aim indicator feel "detached"/delayed: it'd jump
+      // to the mouse position every time the stick eased back toward center.
       const dx = pointer.worldX - playerX;
       const dy = pointer.worldY - playerY;
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
