@@ -128,10 +128,9 @@ export class TitleScene extends Phaser.Scene {
   }
 
   /**
-   * Lets aiming be driven by movement direction instead of the right stick /
-   * mouse, so the game can be played with just WASD + Space + J - no mouse or
-   * right stick needed at all once this is switched on. Persisted via
-   * settings.ts so it's remembered on the next visit, not just this session.
+   * Cycles between the three aim modes (see settings.ts: free / virtualStick /
+   * movement) on click. Persisted via settings.ts so it's remembered on the
+   * next visit, not just this session.
    */
   private createAimModeToggle(centerX: number, y: number): void {
     this.aimModeText = this.add
@@ -154,8 +153,12 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private refreshAimModeText(): void {
-    const label = getAimMode() === "movement" ? "AIM: MOVEMENT (KEYBOARD-ONLY)" : "AIM: FREE (STICK/MOUSE)";
-    this.aimModeText.setText(`[ ${label} ]`);
+    const labels: Record<ReturnType<typeof getAimMode>, string> = {
+      free: "AIM: FREE (STICK/MOUSE)",
+      virtualStick: "AIM: VIRTUAL STICK (MOUSE)",
+      movement: "AIM: MOVEMENT (KEYBOARD-ONLY)",
+    };
+    this.aimModeText.setText(`[ ${labels[getAimMode()]} ]`);
   }
 
   private adjustStartWave(delta: number): void {

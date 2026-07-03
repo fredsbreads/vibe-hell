@@ -5,6 +5,24 @@ import { getAimMode } from "../config/settings";
 const STICK_DEADZONE = 0.2;
 const TRIGGER_THRESHOLD = 0.5;
 
+/**
+ * Fixed screen-space offset (from the bottom-right corner) of the virtual
+ * stick's anchor/neutral point, used by "virtualStick" aim mode and by
+ * MainScene to draw the matching on-screen ring. A constant offset from the
+ * canvas corner rather than a world position, since the whole point is that
+ * this point never moves regardless of where the player is.
+ */
+export const VIRTUAL_STICK_MARGIN_X = 110;
+export const VIRTUAL_STICK_MARGIN_Y = 110;
+export const VIRTUAL_STICK_RADIUS = 60;
+
+export function getVirtualStickAnchor(scene: Phaser.Scene): { x: number; y: number } {
+  return {
+    x: scene.scale.width - VIRTUAL_STICK_MARGIN_X,
+    y: scene.scale.height - VIRTUAL_STICK_MARGIN_Y,
+  };
+}
+
 export interface InputState {
   moveX: number;
   moveY: number;
@@ -68,7 +86,7 @@ export class PlayerInput {
       moveX = applyDeadzone(pad.leftStick.x, STICK_DEADZONE);
       moveY = applyDeadzone(pad.leftStick.y, STICK_DEADZONE);
 
-      if (aimMode === "free") {
+      if (aimMode === "free" || aimMode === "virtualStick") {
         const aimX = applyDeadzone(pad.rightStick.x, STICK_DEADZONE);
         const aimY = applyDeadzone(pad.rightStick.y, STICK_DEADZONE);
         if (aimX !== 0 || aimY !== 0) {
@@ -102,6 +120,20 @@ export class PlayerInput {
       // nowhere.
       if (moveX !== 0 || moveY !== 0) {
         aimAngle = Math.atan2(moveY, moveX);
+      }
+    } else if (!pad && aimMode === "virtualStick") {
+      // Aim from a fixed on-screen anchor to the mouse, instead of from the
+      // player's (moving) position to the mouse. With player-relative aiming, the
+      // mouse position needed to represent "aim east" keeps changing as the player
+      // moves around the arena, since it depends on where the player currently is
+      // on screen - constantly chasing a moving reference point. Anchoring to a
+      // fixed screen point means the same mouse position always means the same
+      // aim direction, like a real analog stick mapped onto the mouse.
+      const anchor = getVirtualStickAnchor(this.scene);
+      const dx = pointer.x - anchor.x;
+      const dy = pointer.y - anchor.y;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        aimAngle = Math.atan2(dy, dx);
       }
     } else if (!pad) {
       // Mouse aim is only a fallback for when there's no gamepad at all - if a pad is

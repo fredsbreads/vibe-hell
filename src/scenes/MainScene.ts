@@ -12,6 +12,8 @@ import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjecti
 import { STOP_WAVE_RADIUS } from "../entities/projectiles/StopWaveProjectile";
 import { CHASER_PROJECTILE_RADIUS } from "../entities/projectiles/ChaserProjectile";
 import { DualSenseMap } from "../input/DualSenseMap";
+import { getVirtualStickAnchor, VIRTUAL_STICK_RADIUS } from "../input/PlayerInput";
+import { getAimMode } from "../config/settings";
 import { MenuOverlay } from "../ui/MenuOverlay";
 
 type UiState = "playing" | "paused" | "gameOver";
@@ -47,6 +49,7 @@ export class MainScene extends Phaser.Scene {
   private debugText!: Phaser.GameObjects.Text;
   private safeLaneGraphic!: Phaser.GameObjects.Graphics;
   private arenaOutlineGraphic!: Phaser.GameObjects.Graphics;
+  private virtualStickGraphic!: Phaser.GameObjects.Graphics;
   private waveText!: Phaser.GameObjects.Text;
   private waveBannerText!: Phaser.GameObjects.Text;
 
@@ -96,6 +99,7 @@ export class MainScene extends Phaser.Scene {
 
     this.arenaOutlineGraphic = this.add.graphics();
     this.safeLaneGraphic = this.add.graphics();
+    this.virtualStickGraphic = this.add.graphics().setScrollFactor(0).setDepth(15);
 
     this.player = new Player(this, arenaBounds.centerX, arenaBounds.centerY, this.arena);
     this.projectileManager = new ProjectileManager(this, this.arena);
@@ -196,6 +200,7 @@ export class MainScene extends Phaser.Scene {
     this.updateWaveUi();
     this.redrawArenaOutline();
     this.redrawSafeLane();
+    this.redrawVirtualStick();
 
     if (this.player.isDead) {
       this.enterGameOver();
@@ -350,6 +355,36 @@ export class MainScene extends Phaser.Scene {
     this.arenaOutlineGraphic.closePath();
     this.arenaOutlineGraphic.fillPath();
     this.arenaOutlineGraphic.strokePath();
+  }
+
+  /**
+   * Draws the virtual stick's fixed anchor ring plus a dot tracking the mouse,
+   * clamped to the ring so it reads like a real stick - visual feedback for
+   * "virtualStick" aim mode. Hidden whenever a gamepad is connected, since in
+   * that case the mode falls back to the real right stick and this UI would be
+   * both unused and misleading.
+   */
+  private redrawVirtualStick(): void {
+    this.virtualStickGraphic.clear();
+    if (getAimMode() !== "virtualStick" || this.input.gamepad?.pad1) {
+      return;
+    }
+
+    const anchor = getVirtualStickAnchor(this);
+    const pointer = this.input.activePointer;
+    const dx = pointer.x - anchor.x;
+    const dy = pointer.y - anchor.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const clampedDist = Math.min(dist, VIRTUAL_STICK_RADIUS);
+    const dotX = dist > 0 ? anchor.x + (dx / dist) * clampedDist : anchor.x;
+    const dotY = dist > 0 ? anchor.y + (dy / dist) * clampedDist : anchor.y;
+
+    this.virtualStickGraphic.lineStyle(2, 0x59f2c8, 0.5);
+    this.virtualStickGraphic.strokeCircle(anchor.x, anchor.y, VIRTUAL_STICK_RADIUS);
+    this.virtualStickGraphic.fillStyle(0x59f2c8, 0.25);
+    this.virtualStickGraphic.fillCircle(anchor.x, anchor.y, 3);
+    this.virtualStickGraphic.fillStyle(0xffe98a, 0.9);
+    this.virtualStickGraphic.fillCircle(dotX, dotY, 8);
   }
 
   /** Renders the Safe Lane Volley Rule's guaranteed-empty arc, sampled along the current wall shape so it hugs flat edges/corners too, not just a circle. */
