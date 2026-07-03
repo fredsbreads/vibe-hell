@@ -219,18 +219,7 @@ export class Player {
     this.slashAngle = angle;
     this.slashActiveRemainingMs = SLASH_DURATION_MS;
     this.slashCooldownRemainingMs = SLASH_COOLDOWN_MS;
-
-    this.slashGraphic.clear();
-    this.slashGraphic.lineStyle(4, 0xf2e85c, 1);
-    this.slashGraphic.beginPath();
-    this.slashGraphic.arc(
-      this.sprite.x,
-      this.sprite.y,
-      SLASH_RANGE,
-      angle - SLASH_ARC_WIDTH / 2,
-      angle + SLASH_ARC_WIDTH / 2,
-    );
-    this.slashGraphic.strokePath();
+    this.redrawSlashArc();
   }
 
   private updateSlash(delta: number): void {
@@ -240,7 +229,28 @@ export class Player {
     this.slashActiveRemainingMs -= delta;
     if (this.slashActiveRemainingMs <= 0) {
       this.slashGraphic.clear();
+    } else {
+      // Redraw at the player's current position each frame - getActiveSlashHitbox()
+      // already tracks live position for the actual hit detection, but the arc was
+      // only ever drawn once at slash-start, so it'd visibly detach from the player
+      // if they moved mid-slash even though the hitbox itself was still following.
+      this.redrawSlashArc();
     }
+  }
+
+  /** Draws the slash arc at the player's current position, along the angle locked in when the slash started. */
+  private redrawSlashArc(): void {
+    this.slashGraphic.clear();
+    this.slashGraphic.lineStyle(4, 0xf2e85c, 1);
+    this.slashGraphic.beginPath();
+    this.slashGraphic.arc(
+      this.sprite.x,
+      this.sprite.y,
+      SLASH_RANGE,
+      this.slashAngle - SLASH_ARC_WIDTH / 2,
+      this.slashAngle + SLASH_ARC_WIDTH / 2,
+    );
+    this.slashGraphic.strokePath();
   }
 
   private tickCooldowns(delta: number): void {
