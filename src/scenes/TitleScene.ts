@@ -1,14 +1,22 @@
 import Phaser from "phaser";
 import { DualSenseMap } from "../input/DualSenseMap";
 
+const MIN_START_WAVE = 1;
+const MAX_START_WAVE = 20;
+const START_WAVE_REGISTRY_KEY = "startWave";
+
 /**
  * The game's title screen, shown on boot and whenever the player backs out
  * from a Game Over. Starts MainScene on Enter/Space, a click on PLAY, or a
- * gamepad Cross press.
+ * gamepad Cross press. Includes a start-wave stepper so a run can jump
+ * straight into a later wave instead of always beginning at wave 1 - handy
+ * for testing/demoing harder waves without playing through the early ones.
  */
 export class TitleScene extends Phaser.Scene {
   private prevCrossHeld = false;
   private started = false;
+  private startWave = MIN_START_WAVE;
+  private startWaveText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("TitleScene");
@@ -18,6 +26,10 @@ export class TitleScene extends Phaser.Scene {
     const { width, height } = this.scale;
     this.started = false;
     this.prevCrossHeld = false;
+    // Remembers the last-picked wave across visits to this screen (e.g. after a
+    // Game Over -> Main Menu trip), via Phaser's registry, since a fresh create()
+    // call would otherwise reset a plain instance field back to its default.
+    this.startWave = this.registry.get(START_WAVE_REGISTRY_KEY) ?? MIN_START_WAVE;
 
     this.add
       .text(width / 2, height / 2 - 80, "VIBE HELL", {
@@ -56,8 +68,12 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    this.createWaveStepper(width / 2, height / 2 + 170);
+
     this.input.keyboard!.once("keydown-ENTER", () => this.startGame());
     this.input.keyboard!.once("keydown-SPACE", () => this.startGame());
+    this.input.keyboard!.on("keydown-LEFT", () => this.adjustStartWave(-1));
+    this.input.keyboard!.on("keydown-RIGHT", () => this.adjustStartWave(1));
   }
 
   update(): void {
@@ -72,11 +88,57 @@ export class TitleScene extends Phaser.Scene {
     this.prevCrossHeld = crossHeld;
   }
 
+  private createWaveStepper(centerX: number, y: number): void {
+    const minusButton = this.add
+      .text(centerX - 110, y, "-", {
+        fontFamily: "monospace",
+        fontSize: "22px",
+        color: "#59f2c8",
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    minusButton.on("pointerover", () => minusButton.setColor("#ffffff"));
+    minusButton.on("pointerout", () => minusButton.setColor("#59f2c8"));
+    minusButton.on("pointerdown", () => this.adjustStartWave(-1));
+
+    this.startWaveText = this.add
+      .text(centerX, y, "", {
+        fontFamily: "monospace",
+        fontSize: "16px",
+        color: "#e0e0f0",
+      })
+      .setOrigin(0.5);
+
+    const plusButton = this.add
+      .text(centerX + 110, y, "+", {
+        fontFamily: "monospace",
+        fontSize: "22px",
+        color: "#59f2c8",
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    plusButton.on("pointerover", () => plusButton.setColor("#ffffff"));
+    plusButton.on("pointerout", () => plusButton.setColor("#59f2c8"));
+    plusButton.on("pointerdown", () => this.adjustStartWave(1));
+
+    this.refreshStartWaveText();
+  }
+
+  private adjustStartWave(delta: number): void {
+    this.startWave = Phaser.Math.Clamp(this.startWave + delta, MIN_START_WAVE, MAX_START_WAVE);
+    this.registry.set(START_WAVE_REGISTRY_KEY, this.startWave);
+    this.refreshStartWaveText();
+  }
+
+  private refreshStartWaveText(): void {
+    this.startWaveText.setText(`START WAVE: ${this.startWave}`);
+  }
+
   private startGame(): void {
     if (this.started) {
       return;
     }
     this.started = true;
-    this.scene.start("MainScene");
+    this.scene.start("MainScene", { startWave: this.startWave });
   }
 }

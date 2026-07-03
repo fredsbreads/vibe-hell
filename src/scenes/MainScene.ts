@@ -27,12 +27,17 @@ const ARENA_SHAPE_CYCLE: Array<{ label: string; build: (bounds: ArenaBounds) => 
   { label: "Octagon", build: (bounds) => new PolygonArena(bounds, 8, ARENA_ROTATION_RAD_PER_MS) },
 ];
 
+interface MainSceneData {
+  startWave?: number;
+}
+
 export class MainScene extends Phaser.Scene {
   private player!: Player;
   private projectileManager!: ProjectileManager;
   private waveManager!: WaveManager;
   private arena!: Arena;
   private arenaShapeIndex = 0;
+  private startWave = 1;
 
   private threatsEndured = 0;
   private threatsText!: Phaser.GameObjects.Text;
@@ -55,7 +60,7 @@ export class MainScene extends Phaser.Scene {
     super("MainScene");
   }
 
-  create(): void {
+  create(data: MainSceneData): void {
     const { width, height } = this.scale;
 
     // Re-assign every run-scoped field explicitly: scene.restart() re-invokes create()
@@ -67,6 +72,11 @@ export class MainScene extends Phaser.Scene {
     this.prevEscHeld = false;
     this.prevConfirmHeld = false;
     this.prevRestartHeld = false;
+    // Restart passes { startWave: this.startWave } explicitly (see restartRun) so a
+    // jumped-to wave survives a restart; falls back to 1 if launched with no data at all.
+    if (data?.startWave !== undefined) {
+      this.startWave = data.startWave;
+    }
 
     const arenaBounds: ArenaBounds = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
     this.arena = new Arena(arenaBounds, ARENA_SHAPE_CYCLE[this.arenaShapeIndex].build(arenaBounds));
@@ -82,7 +92,7 @@ export class MainScene extends Phaser.Scene {
 
     this.player = new Player(this, arenaBounds.centerX, arenaBounds.centerY, this.arena);
     this.projectileManager = new ProjectileManager(this, this.arena);
-    this.waveManager = new WaveManager(this.projectileManager);
+    this.waveManager = new WaveManager(this.projectileManager, this.startWave);
 
     this.threatsText = this.add
       .text(width - 12, 12, "", {
@@ -250,7 +260,10 @@ export class MainScene extends Phaser.Scene {
   }
 
   private restartRun(): void {
-    this.scene.restart();
+    // Explicitly re-pass startWave: scene.restart() with no data does not automatically
+    // resupply what create() originally received, so a jumped-to wave would otherwise
+    // silently fall back to wave 1 on restart.
+    this.scene.restart({ startWave: this.startWave });
   }
 
   private goToMainMenu(): void {

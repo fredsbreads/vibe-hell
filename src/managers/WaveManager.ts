@@ -26,7 +26,11 @@ export class WaveManager {
   private phaseValue: WavePhase = "active";
   private phaseTimeRemainingMsValue = WAVE_DURATION_MS;
 
-  constructor(private readonly projectileManager: ProjectileManager) {
+  constructor(
+    private readonly projectileManager: ProjectileManager,
+    startWave = 1,
+  ) {
+    this.wave = startWave;
     this.applyWaveConfig();
   }
 
