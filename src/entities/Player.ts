@@ -280,10 +280,27 @@ export class Player {
       const scale = maxDist / dist;
       const clampedX = this.arena.bounds.centerX + dx * scale;
       const clampedY = this.arena.bounds.centerY + dy * scale;
+
+      const body = this.sprite.body as Phaser.Physics.Arcade.Body;
       // setPosition() alone would leave the Arcade body's internal position out of
-      // sync, letting it drift past the wall on the next physics step. body.reset()
-      // repositions and re-syncs both, and halts velocity into the wall.
-      (this.sprite.body as Phaser.Physics.Arcade.Body).reset(clampedX, clampedY);
+      // sync, letting it drift past the wall on the next physics step - but unlike
+      // body.reset(), updateFromGameObject() re-syncs position without also zeroing
+      // velocity. body.reset() was killing ALL velocity (including the along-wall
+      // component) every single frame you pressed into the wall, which is what made
+      // moving along the perimeter feel like stopping and restarting each frame
+      // instead of sliding.
+      this.sprite.setPosition(clampedX, clampedY);
+      body.updateFromGameObject();
+
+      // Only cancel the outward-pointing component of velocity (against the true
+      // wall normal - a flat edge's normal for polygon arenas, radial for a circle),
+      // preserving whatever's left tangent to the wall so you slide along it.
+      const normal = this.arena.normalAtAngle(angle);
+      const outwardSpeed = body.velocity.x * normal.x + body.velocity.y * normal.y;
+      if (outwardSpeed > 0) {
+        body.velocity.x -= outwardSpeed * normal.x;
+        body.velocity.y -= outwardSpeed * normal.y;
+      }
     }
   }
 
