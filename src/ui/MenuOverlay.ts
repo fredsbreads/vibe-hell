@@ -69,12 +69,32 @@ export class MenuOverlay {
         .setDepth(TEXT_DEPTH)
         .setInteractive({ useHandCursor: true });
 
-      text.on("pointerover", () => text.setColor("#ffffff"));
-      text.on("pointerout", () => text.setColor("#59f2c8"));
       text.on("pointerdown", () => button.onSelect());
 
       this.buttonTexts.push(text);
     });
+  }
+
+  /**
+   * Re-derives each button's hover color from the pointer's current position
+   * every frame, rather than trusting Phaser's pointerover/pointerout events
+   * alone. Those events only fire on an actual pointermove/pointerdown - if
+   * the browser drops one (tab loses focus mid-hover, a fast physical mouse
+   * flick coalesced into one big jump, buttons destroyed and recreated at the
+   * same spot under a stationary cursor, etc.) a button can end up stuck
+   * showing the hover color with no future event left to correct it. Polling
+   * the pointer position instead makes the highlight self-correcting - it can
+   * never be more than one frame stale.
+   */
+  update(): void {
+    if (this.buttonTexts.length === 0) {
+      return;
+    }
+    const pointer = this.scene.input.activePointer;
+    for (const text of this.buttonTexts) {
+      const hovered = text.getBounds().contains(pointer.x, pointer.y);
+      text.setColor(hovered ? "#ffffff" : "#59f2c8");
+    }
   }
 
   hide(): void {

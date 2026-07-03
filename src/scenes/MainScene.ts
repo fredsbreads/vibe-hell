@@ -143,6 +143,7 @@ export class MainScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.pollMenuInputs();
+    this.menuOverlay.update();
 
     if (this.uiState !== "playing") {
       return;

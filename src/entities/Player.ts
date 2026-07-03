@@ -101,6 +101,7 @@ export class Player {
       if (move.lengthSq() > 0) {
         move.normalize().scale(MOVE_SPEED);
       }
+      this.clipOutwardComponent(move);
       this.sprite.setVelocity(move.x, move.y);
     }
 
@@ -167,10 +168,18 @@ export class Player {
         ? moveVector.normalize()
         : new Phaser.Math.Vector2(Math.cos(state.aimAngle), Math.sin(state.aimAngle));
 
+    const dashVelocity = dashDirection.scale(DASH_SPEED);
+    // Dash bypasses the normal per-frame movement path entirely (it sets velocity
+    // once up front), so without this it could slam full-speed into a wall you're
+    // already standing at and get slapped back by the post-hoc safety clamp -
+    // a much harder "bounce" than walking into a wall thanks to dash's 900px/s
+    // speed. Clip it the same way regular movement is clipped.
+    this.clipOutwardComponent(dashVelocity);
+
     this.isDashing = true;
     this.dashTimeRemainingMs = DASH_DURATION_MS;
     this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
-    this.sprite.setVelocity(dashDirection.x * DASH_SPEED, dashDirection.y * DASH_SPEED);
+    this.sprite.setVelocity(dashVelocity.x, dashVelocity.y);
 
     this.sprite.setTint(DASH_TINT);
     this.spawnDashGhost();
@@ -275,6 +284,46 @@ export class Player {
     this.sprite.setAlpha(blinkOn ? 0.35 : 1);
   }
 
+  /**
+   * Strips the outward-pointing component of a movement/velocity vector if the
+   * player is already sitting at (or past) the arena wall at their current
+   * position - comparing the wall's outward normal against the requested
+   * direction up front, before it's ever handed to physics. This is what
+   * actually prevents the wall from feeling bouncy: nothing ever gets applied
+   * that would overshoot the boundary in the first place, so there's no
+   * overshoot-then-snap-back cycle to begin with. Used for both normal
+   * movement and dash, since dash's 900px/s burst would otherwise slam past
+   * the wall and get yanked back much harder than walking does.
+   */
+  private clipOutwardComponent(vector: Phaser.Math.Vector2): void {
+    const dx = this.sprite.x - this.arena.bounds.centerX;
+    const dy = this.sprite.y - this.arena.bounds.centerY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= 0) {
+      return;
+    }
+
+    const angle = Math.atan2(dy, dx);
+    const maxDist = this.arena.maxRadiusAtAngle(angle) - Player.RADIUS;
+    if (dist < maxDist) {
+      return;
+    }
+
+    const normal = this.arena.normalAtAngle(angle);
+    const outward = vector.x * normal.x + vector.y * normal.y;
+    if (outward > 0) {
+      vector.x -= outward * normal.x;
+      vector.y -= outward * normal.y;
+    }
+  }
+
+  /**
+   * Pure positional safety net, run after movement/dash each frame. Ordinary
+   * play should rarely trigger this now that clipOutwardComponent() stops
+   * outward velocity before it's applied - this only catches the cases that
+   * aren't about the player's own velocity: a rotating polygon wall sweeping
+   * inward past the player's fixed position, or any residual float drift.
+   */
   private clampToArena(): void {
     const dx = this.sprite.x - this.arena.bounds.centerX;
     const dy = this.sprite.y - this.arena.bounds.centerY;
@@ -286,34 +335,17 @@ export class Player {
     const angle = Math.atan2(dy, dx);
     const maxDist = this.arena.maxRadiusAtAngle(angle) - Player.RADIUS;
 
-    // >= (not just >) matters here: once a prior frame has already snapped the
-    // player exactly onto the boundary, dist sits at precisely maxDist. update()
-    // unconditionally overwrites velocity from raw input before this runs, so if
-    // we only trimmed velocity while strictly past the boundary, a player holding
-    // straight into the wall would get one full frame of un-trimmed outward
-    // velocity through to the physics step, overshoot, get snapped back next
-    // frame, then repeat - a constant push-out/snap-back cycle that reads as
-    // bouncy/jittery instead of a smooth slide. Trimming at dist === maxDist too
-    // kills the outward component before it ever reaches the physics engine.
-    if (dist >= maxDist) {
+    if (dist > maxDist) {
       const scale = maxDist / dist;
       const clampedX = this.arena.bounds.centerX + dx * scale;
       const clampedY = this.arena.bounds.centerY + dy * scale;
 
       const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-      // setPosition() alone would leave the Arcade body's internal position out of
-      // sync, letting it drift past the wall on the next physics step - but unlike
-      // body.reset(), updateFromGameObject() re-syncs position without also zeroing
-      // velocity. body.reset() was killing ALL velocity (including the along-wall
-      // component) every single frame you pressed into the wall, which is what made
-      // moving along the perimeter feel like stopping and restarting each frame
-      // instead of sliding.
+      // updateFromGameObject() re-syncs the Arcade body's position without
+      // touching velocity, unlike body.reset() which zeroes it entirely.
       this.sprite.setPosition(clampedX, clampedY);
       body.updateFromGameObject();
 
-      // Only cancel the outward-pointing component of velocity (against the true
-      // wall normal - a flat edge's normal for polygon arenas, radial for a circle),
-      // preserving whatever's left tangent to the wall so you slide along it.
       const normal = this.arena.normalAtAngle(angle);
       const outwardSpeed = body.velocity.x * normal.x + body.velocity.y * normal.y;
       if (outwardSpeed > 0) {
