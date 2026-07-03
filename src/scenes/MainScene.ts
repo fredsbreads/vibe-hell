@@ -52,9 +52,11 @@ export class MainScene extends Phaser.Scene {
   private escKey!: Phaser.Input.Keyboard.Key;
   private confirmKey!: Phaser.Input.Keyboard.Key;
   private restartKey!: Phaser.Input.Keyboard.Key;
+  private mainMenuKey!: Phaser.Input.Keyboard.Key;
   private prevEscHeld = false;
   private prevConfirmHeld = false;
   private prevRestartHeld = false;
+  private prevMainMenuHeld = false;
 
   constructor() {
     super("MainScene");
@@ -72,6 +74,7 @@ export class MainScene extends Phaser.Scene {
     this.prevEscHeld = false;
     this.prevConfirmHeld = false;
     this.prevRestartHeld = false;
+    this.prevMainMenuHeld = false;
     // Restart passes { startWave: this.startWave } explicitly (see restartRun) so a
     // jumped-to wave survives a restart; falls back to 1 if launched with no data at all.
     if (data?.startWave !== undefined) {
@@ -133,6 +136,7 @@ export class MainScene extends Phaser.Scene {
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.confirmKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+    this.mainMenuKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
 
     this.setupDebugSpawnToggles();
   }
@@ -229,6 +233,13 @@ export class MainScene extends Phaser.Scene {
     if (restartPressed) {
       this.restartRun();
     }
+
+    const mainMenuHeld = this.mainMenuKey.isDown || !!pad?.isButtonDown(DualSenseMap.TRIANGLE);
+    const mainMenuPressed = mainMenuHeld && !this.prevMainMenuHeld;
+    this.prevMainMenuHeld = mainMenuHeld;
+    if (mainMenuPressed) {
+      this.goToMainMenu();
+    }
   }
 
   private enterPause(): void {
@@ -238,6 +249,7 @@ export class MainScene extends Phaser.Scene {
     this.menuOverlay.show("PAUSED", "", [
       { label: "RESUME", onSelect: () => this.exitPause() },
       { label: "RESTART", onSelect: () => this.restartRun() },
+      { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
     ]);
   }
 
