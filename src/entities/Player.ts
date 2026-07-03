@@ -301,8 +301,15 @@ export class Player {
    * the wall and get yanked back much harder than walking does.
    */
   private clipOutwardComponent(vector: Phaser.Math.Vector2): void {
-    const dx = this.sprite.x - this.arena.bounds.centerX;
-    const dy = this.sprite.y - this.arena.bounds.centerY;
+    // Reads body.center, NOT sprite.x/y. During Scene.update(), Arcade Physics has
+    // already integrated this frame's velocity into the body (that happens earlier,
+    // in its own preupdate/update step), but hasn't written it back to the sprite's
+    // transform yet - that reconciliation happens in postupdate, which runs AFTER
+    // Scene.update(). So sprite.x here is one frame stale relative to where physics
+    // actually just put the body. body.center is always current.
+    const body = this.sprite.body as Phaser.Physics.Arcade.Body;
+    const dx = body.center.x - this.arena.bounds.centerX;
+    const dy = body.center.y - this.arena.bounds.centerY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= 0) {
       return;
@@ -339,8 +346,18 @@ export class Player {
    * inward past the player's fixed position, or any residual float drift.
    */
   private clampToArena(): void {
-    const dx = this.sprite.x - this.arena.bounds.centerX;
-    const dy = this.sprite.y - this.arena.bounds.centerY;
+    const body = this.sprite.body as Phaser.Physics.Arcade.Body;
+    // body.center, not sprite.x/y - see clipOutwardComponent's comment. Using the
+    // stale sprite position here was the actual cause of the "touch the wall and
+    // get stuck forever" bug: once the player reached the boundary, this method
+    // would recompute the SAME clampedX/Y from the SAME stale sprite.x every frame
+    // (since sprite.x only updates once postUpdate runs, which is after this),
+    // repeatedly overwriting body.position back to that one frozen value and
+    // discarding whatever the real physics step had just integrated - so postUpdate's
+    // delta (body.position - prevFrame) collapsed to zero and the sprite never moved
+    // again, no matter what the input or velocity was doing.
+    const dx = body.center.x - this.arena.bounds.centerX;
+    const dy = body.center.y - this.arena.bounds.centerY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= 0) {
       return;
@@ -354,7 +371,6 @@ export class Player {
       const clampedX = this.arena.bounds.centerX + dx * scale;
       const clampedY = this.arena.bounds.centerY + dy * scale;
 
-      const body = this.sprite.body as Phaser.Physics.Arcade.Body;
       // Writing directly to body.position (not sprite.setPosition()) matters here.
       // Arcade's postUpdate runs AFTER Scene.update() every frame and reconciles the
       // sprite from the body via gameObject.x += (body.position.x - prevFrame.x) -
