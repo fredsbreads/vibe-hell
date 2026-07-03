@@ -22,6 +22,12 @@ const SLASH_ARC_WIDTH = 0.9;
 
 const STARTING_HP = 3;
 
+// Brief invincibility after taking a hit, separate from dash i-frames, so a
+// cluster of overlapping projectiles can't chain-damage you in the same
+// instant with zero chance to react.
+const HIT_INVINCIBILITY_MS = 700;
+const HIT_BLINK_INTERVAL_MS = 80;
+
 export interface SlashHitbox {
   x: number;
   y: number;
@@ -36,7 +42,6 @@ export class Player {
   readonly sprite: Phaser.Physics.Arcade.Sprite;
 
   aimAngle = -Math.PI / 2;
-  isInvincible = false;
 
   private readonly input: PlayerInput;
   private readonly aimIndicator: Phaser.GameObjects.Graphics;
@@ -52,6 +57,7 @@ export class Player {
   private slashCooldownRemainingMs = 0;
 
   private hp = STARTING_HP;
+  private hitGraceRemainingMs = 0;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -99,6 +105,7 @@ export class Player {
     }
 
     this.clampToArena();
+    this.updateHitGraceVisual();
 
     this.redrawAimIndicator();
     this.redrawStatusText();
@@ -112,15 +119,20 @@ export class Player {
     return this.hp <= 0;
   }
 
+  /** True during dash i-frames OR the brief post-hit grace window - either source blocks normal contact damage. */
+  get isInvincible(): boolean {
+    return this.isDashing || this.hitGraceRemainingMs > 0;
+  }
+
   takeDamage(amount: number): void {
     this.hp = Math.max(0, this.hp - amount);
+    this.hitGraceRemainingMs = HIT_INVINCIBILITY_MS;
     this.playHurtEffect();
   }
 
   /** Hard counter for Stop Waves: cancels any active dash, strips i-frames, and deals damage, bypassing normal invincibility. */
   interruptDashAndDamage(amount: number): void {
     this.isDashing = false;
-    this.isInvincible = false;
     this.dashTimeRemainingMs = 0;
     this.sprite.setVelocity(0, 0);
     this.takeDamage(amount);
@@ -156,7 +168,6 @@ export class Player {
         : new Phaser.Math.Vector2(Math.cos(state.aimAngle), Math.sin(state.aimAngle));
 
     this.isDashing = true;
-    this.isInvincible = true;
     this.dashTimeRemainingMs = DASH_DURATION_MS;
     this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
     this.sprite.setVelocity(dashDirection.x * DASH_SPEED, dashDirection.y * DASH_SPEED);
@@ -173,7 +184,6 @@ export class Player {
     this.dashTimeRemainingMs -= delta;
     if (this.dashTimeRemainingMs <= 0) {
       this.isDashing = false;
-      this.isInvincible = false;
       this.sprite.clearTint();
     }
   }
@@ -240,6 +250,19 @@ export class Player {
     if (this.slashCooldownRemainingMs > 0) {
       this.slashCooldownRemainingMs = Math.max(0, this.slashCooldownRemainingMs - delta);
     }
+    if (this.hitGraceRemainingMs > 0) {
+      this.hitGraceRemainingMs = Math.max(0, this.hitGraceRemainingMs - delta);
+    }
+  }
+
+  /** Blinks the sprite while the post-hit grace window is active, so the player can see they're currently safe. */
+  private updateHitGraceVisual(): void {
+    if (this.hitGraceRemainingMs <= 0) {
+      this.sprite.setAlpha(1);
+      return;
+    }
+    const blinkOn = Math.floor(this.hitGraceRemainingMs / HIT_BLINK_INTERVAL_MS) % 2 === 0;
+    this.sprite.setAlpha(blinkOn ? 0.35 : 1);
   }
 
   private clampToArena(): void {
