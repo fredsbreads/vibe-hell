@@ -181,24 +181,19 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // Stop Wave damages on contact regardless of dash state (it bypasses dash
-    // i-frames entirely) - but it's a persistent hazard, not destroyed by
-    // contact, so an ongoing overlap while the bar sweeps past would
-    // re-damage every single frame without this gate. The general post-hit
-    // grace window (not dash i-frames specifically) is what prevents that,
-    // same as it does for every other threat type.
-    if (!this.player.isHitGraceActive) {
+    // Stop Wave is a pure Dash counter: walking through it is completely
+    // harmless, so the check only ever runs while the player is dashing.
+    // Getting hit cancels the dash immediately (interruptDashAndDamage), which
+    // naturally prevents repeat damage from the same overlap on the next
+    // frame - isDashActive is already false by then.
+    if (this.player.isDashActive) {
       const stopWaveHits = this.projectileManager.checkStopWaveCollisions(
         this.player.sprite.x,
         this.player.sprite.y,
         Player.RADIUS,
       );
       if (stopWaveHits > 0) {
-        if (this.player.isDashActive) {
-          this.player.interruptDashAndDamage(stopWaveHits);
-        } else {
-          this.player.takeDamage(stopWaveHits);
-        }
+        this.player.interruptDashAndDamage(stopWaveHits);
       }
     }
 

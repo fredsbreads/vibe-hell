@@ -136,14 +136,9 @@ export class Player {
     return this.isDashing || this.hitGraceRemainingMs > 0;
   }
 
-  /** Whether a dash is currently active - Stop Wave contact additionally cancels the dash when this is true. */
+  /** Whether a dash is currently active - Stop Wave only reacts to contact made while this is true. */
   get isDashActive(): boolean {
     return this.isDashing;
-  }
-
-  /** Whether the brief post-hit grace window is running - used to gate Stop Wave contact so an ongoing overlap doesn't re-damage every single frame. */
-  get isHitGraceActive(): boolean {
-    return this.hitGraceRemainingMs > 0;
   }
 
   takeDamage(amount: number): void {
@@ -153,10 +148,9 @@ export class Player {
   }
 
   /**
-   * Punishes dashing into a Stop Wave: cancels the dash, strips i-frames, and deals
-   * damage, bypassing normal invincibility. Only called while isDashActive is true
-   * (see MainScene) - contact while not dashing still damages, just via a plain
-   * takeDamage() call instead, since there's no dash to cancel.
+   * Hard counter for Stop Waves: cancels any active dash, strips i-frames, and deals
+   * damage, bypassing normal invincibility. Only ever called while isDashActive is
+   * true (see MainScene) - walking through a Stop Wave without dashing does nothing.
    */
   interruptDashAndDamage(amount: number): void {
     this.isDashing = false;

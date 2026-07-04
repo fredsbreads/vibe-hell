@@ -4,32 +4,33 @@ import { Arena } from "../../arena/Arena";
 const STOP_WAVE_SPEED = 70;
 const STOP_WAVE_COLOR = 0x5c8df2;
 
-/** How thick the sweeping bar is along its direction of travel. */
-const THICKNESS = 56;
-
-/** Fraction of the bar's total length that's carved out as a passable gap. */
-const GAP_FRACTION = 0.22;
+// Thin enough to read as a line sweeping through, not a wall - but not
+// thinner than that: dash moves at up to ~15px per frame at 60fps, and
+// collision is checked once per frame at the player's current position, so a
+// thickness much below that risks the dash tunneling straight through
+// between two frames without ever registering an overlap.
+const THICKNESS = 20;
 
 /** Extra length beyond the arena's own radius, so the bar always fully spans the local width regardless of shape or rotation. */
 const HALF_LENGTH_MARGIN = 60;
 
-/** How long the bar sits still at its spawn edge, telegraphing where the gap is, before it starts sweeping. */
+/** How long the bar sits still at its spawn edge, telegraphing its arrival, before it starts sweeping. */
 const SPAWN_TELEGRAPH_MS = 500;
 const TELEGRAPH_ALPHA = 0.35;
 
 /**
- * A Stop Wave: a straight bar spanning the full width of the arena,
- * perpendicular to its direction of travel, sweeping from one side clean
- * across to the opposite side. Per the GDD it's a hard counter to Dash -
- * immune to Slash, and it damages on contact even through dash i-frames -
- * but unlike the other threat types it is NOT destroyed by contact; it's a
- * persistent hazard you get out of the way of, not an obstacle you clear.
+ * A Stop Wave: a thin, solid bar spanning the full width of the arena,
+ * perpendicular to its direction of travel, sweeping clean across from one
+ * side to the opposite side. No gap - unlike the perimeter spawner's threats,
+ * it isn't meant to be dodged by positioning. It's purely a Dash-specific
+ * hard counter: walking through it is completely harmless (see MainScene,
+ * which only checks collision at all while the player is dashing), but
+ * dashing into it cancels the dash and deals damage, bypassing the i-frames
+ * dash would normally grant against everything else.
  *
- * The bar always carries one gap: a contiguous passable segment of its own
- * length, sized and positioned once at spawn, telegraphed before the sweep
- * begins so there's time to read where it is and move into alignment with
- * it before the bar arrives. This mirrors the perimeter spawner's Safe Lane
- * Volley Rule, applied to the wave's own geometry instead of spawn points.
+ * Not destroyed by contact - it's a persistent hazard, not an obstacle you
+ * clear. Its lifetime is bounded by crossing the arena's diameter, so unlike
+ * the old circular design it can never linger indefinitely.
  *
  * Doesn't extend LinearProjectile: that base assumes a circular hitbox and
  * "escaped once far enough from center," neither of which fits a line that
@@ -43,8 +44,6 @@ export class StopWaveProjectile {
 
   private travelAngle = 0;
   private halfLength = 0;
-  private gapStart = 0;
-  private gapEnd = 0;
   private telegraphRemainingMs = 0;
   private distanceTraveled = 0;
   private escapeDistance = 0;
@@ -58,21 +57,13 @@ export class StopWaveProjectile {
   /**
    * Spawns at (x, y) on the perimeter, traveling along travelAngle (straight
    * across the arena, not homing on the player - the whole point is that it
-   * sweeps the field uniformly). The gap's lateral position is randomized
-   * within the bar's length, kept clear of the very ends so it's never
-   * trivially unreachable.
+   * sweeps the field uniformly).
    */
   activate(x: number, y: number, travelAngle: number, arena: Arena): void {
     this.x = x;
     this.y = y;
     this.travelAngle = travelAngle;
     this.halfLength = arena.bounds.radius + HALF_LENGTH_MARGIN;
-
-    const gapLength = this.halfLength * 2 * GAP_FRACTION;
-    const maxOffset = this.halfLength - gapLength / 2 - 20;
-    const gapCenter = (Math.random() * 2 - 1) * maxOffset;
-    this.gapStart = gapCenter - gapLength / 2;
-    this.gapEnd = gapCenter + gapLength / 2;
 
     this.telegraphRemainingMs = SPAWN_TELEGRAPH_MS;
     this.distanceTraveled = 0;
@@ -105,14 +96,12 @@ export class StopWaveProjectile {
     return this.distanceTraveled >= this.escapeDistance;
   }
 
-  /** True if the player's whole circle at this lateral offset fits inside the gap. */
-  private isLateralOffsetSafe(lateralOffset: number, radius: number): boolean {
-    return lateralOffset - radius >= this.gapStart && lateralOffset + radius <= this.gapEnd;
-  }
-
   /**
-   * True if the player's circle overlaps the bar's solid (non-gap) region.
-   * Ignored entirely while still telegraphing - the bar isn't hazardous yet.
+   * True if the player's circle overlaps the bar's thickness band, anywhere
+   * along its length (no gap to check). Ignored entirely while still
+   * telegraphing - the bar isn't hazardous yet. Purely geometric: it doesn't
+   * know or care whether the player is dashing - that decision belongs to
+   * the caller (MainScene only checks this at all while dashing).
    */
   checkCollision(playerX: number, playerY: number, playerRadius: number): boolean {
     if (!this.active || this.telegraphRemainingMs > 0) {
@@ -122,28 +111,14 @@ export class StopWaveProjectile {
     const dx = playerX - this.x;
     const dy = playerY - this.y;
     const forward = Math.cos(this.travelAngle) * dx + Math.sin(this.travelAngle) * dy;
-    if (Math.abs(forward) > THICKNESS / 2 + playerRadius) {
-      return false;
-    }
-
-    const lateralAngle = this.travelAngle + Math.PI / 2;
-    const lateral = Math.cos(lateralAngle) * dx + Math.sin(lateralAngle) * dy;
-    return !this.isLateralOffsetSafe(lateral, playerRadius);
+    return Math.abs(forward) <= THICKNESS / 2 + playerRadius;
   }
 
   private redraw(): void {
     this.graphic.clear();
     const alpha = this.telegraphRemainingMs > 0 ? TELEGRAPH_ALPHA : 0.92;
     this.graphic.fillStyle(STOP_WAVE_COLOR, alpha);
-    this.drawSegment(-this.halfLength, this.gapStart);
-    this.drawSegment(this.gapEnd, this.halfLength);
-  }
 
-  /** Draws one solid slab of the bar (the two segments flanking the gap), rotated to travelAngle. */
-  private drawSegment(lateralStart: number, lateralEnd: number): void {
-    if (lateralEnd <= lateralStart) {
-      return;
-    }
     const forwardX = Math.cos(this.travelAngle);
     const forwardY = Math.sin(this.travelAngle);
     const lateralAngle = this.travelAngle + Math.PI / 2;
@@ -156,10 +131,10 @@ export class StopWaveProjectile {
       y: this.y + lateralY * lat + forwardY * thick,
     });
 
-    const a = corner(lateralStart, -halfThick);
-    const b = corner(lateralEnd, -halfThick);
-    const c = corner(lateralEnd, halfThick);
-    const d = corner(lateralStart, halfThick);
+    const a = corner(-this.halfLength, -halfThick);
+    const b = corner(this.halfLength, -halfThick);
+    const c = corner(this.halfLength, halfThick);
+    const d = corner(-this.halfLength, halfThick);
 
     this.graphic.beginPath();
     this.graphic.moveTo(a.x, a.y);

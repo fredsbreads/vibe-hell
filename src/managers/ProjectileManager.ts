@@ -156,9 +156,8 @@ function checkContactOnPool(
 }
 
 // Stop Wave doesn't fit the LinearProjectile model (circular hitbox, escape
-// by distance-from-center) - it's a full-width sweeping bar with a gap, so it
-// gets its own spawn/step/collision helpers rather than reusing the generic
-// ones above.
+// by distance-from-center) - it's a full-width sweeping bar, so it gets its
+// own spawn/step/collision helpers rather than reusing the generic ones above.
 
 function findInactiveStopWave(pool: StopWaveProjectile[]): StopWaveProjectile | undefined {
   return pool.find((p) => !p.active);
@@ -195,9 +194,8 @@ function stepStopWavePool(pool: StopWaveProjectile[], delta: number): number {
 
 /**
  * Unlike checkContactOnPool, contact does NOT deactivate the wave - it's a
- * persistent hazard you get out of the way of, not an obstacle destroyed by
- * touching it. Returns how many waves the player is currently overlapping in
- * their solid (non-gap) section.
+ * persistent hazard, not an obstacle destroyed by touching it. Returns how
+ * many waves the player is currently overlapping.
  */
 function checkStopWaveContact(
   pool: StopWaveProjectile[],
@@ -426,13 +424,11 @@ export class ProjectileManager {
   }
 
   /**
-   * Stop Wave damages on contact with its solid section regardless of dash
-   * state - it bypasses dash i-frames entirely, unlike Basic/Zoomer/Chaser.
-   * Unlike those types, contact doesn't deactivate it: it's a persistent
-   * sweeping hazard, not something destroyed by touching it, so call this
-   * every frame (see MainScene, which gates it behind the general post-hit
-   * grace window instead, to avoid re-damaging every frame of an ongoing
-   * overlap while the bar sweeps past).
+   * Stop Wave is a pure Dash counter, not a general obstacle: only call this
+   * while the player is dashing (see MainScene) - walking through it should
+   * have no effect at all. Unlike Basic/Zoomer/Chaser, contact doesn't
+   * deactivate it: it's a persistent sweeping hazard, not something destroyed
+   * by touching it.
    */
   checkStopWaveCollisions(playerX: number, playerY: number, playerRadius: number): number {
     const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, HIT_POP_COLOR);
