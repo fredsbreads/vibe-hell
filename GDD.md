@@ -87,7 +87,7 @@ Difficulty scales along two independent axes so a single wave transition never c
 ### Scoring Configuration
 
 - **Metric Title:** THREATS ENDURED
-- **Logic:** Score increments by 1 whenever a slashable projectile is successfully deactivated by a player Slash, or whenever a projectile naturally flies outside of the playable field boundaries.
+- **Logic:** Score increments by 1 whenever a slashable projectile is successfully deactivated by a player Slash. A projectile that naturally flies outside the playable field boundaries unhandled is not scored.
 
 ## 6. Technical Implementation Directives
 

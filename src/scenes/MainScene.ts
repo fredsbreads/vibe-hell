@@ -166,9 +166,11 @@ export class MainScene extends Phaser.Scene {
 
     this.player.update(delta);
 
-    const escaped = this.projectileManager.update(delta, this.player.sprite.x, this.player.sprite.y);
+    this.projectileManager.update(delta, this.player.sprite.x, this.player.sprite.y);
+    // Only a Slash kill counts as a "threat endured" - a projectile that simply
+    // escapes the arena unhandled isn't scored.
     const slashHits = this.projectileManager.checkSlashHits(this.player.getActiveSlashHitbox());
-    this.threatsEndured += escaped + slashHits;
+    this.threatsEndured += slashHits;
 
     if (!this.player.isInvincible) {
       const damage = this.projectileManager.checkPlayerCollisions(

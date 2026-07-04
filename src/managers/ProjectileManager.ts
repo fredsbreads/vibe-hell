@@ -102,24 +102,15 @@ function spawnOnPerimeter(
   projectile.activate(spawnPoint.x, spawnPoint.y, playerX, playerY);
 }
 
-function stepPool(
-  pool: LinearProjectile[],
-  delta: number,
-  arena: Arena,
-  playerX: number,
-  playerY: number,
-): number {
-  let escaped = 0;
+function stepPool(pool: LinearProjectile[], delta: number, arena: Arena, playerX: number, playerY: number): void {
   for (const projectile of pool) {
     if (!projectile.active) {
       continue;
     }
     if (projectile.step(delta, arena, playerX, playerY)) {
       projectile.deactivate();
-      escaped++;
     }
   }
-  return escaped;
 }
 
 function checkSlashHitsOnPool(pool: LinearProjectile[], hitbox: SlashHitbox, onHit: (x: number, y: number) => void): number {
@@ -189,18 +180,15 @@ function spawnStopWave(
   wave.activate(spawnPoint.x, spawnPoint.y, travelAngle, arena, speed);
 }
 
-function stepStopWavePool(pool: StopWaveProjectile[], delta: number): number {
-  let escaped = 0;
+function stepStopWavePool(pool: StopWaveProjectile[], delta: number): void {
   for (const wave of pool) {
     if (!wave.active) {
       continue;
     }
     if (wave.step(delta)) {
       wave.deactivate();
-      escaped++;
     }
   }
-  return escaped;
 }
 
 /**
@@ -357,8 +345,8 @@ export class ProjectileManager {
     }
   }
 
-  /** Advances all spawners and active projectiles. Returns how many escaped the arena unhandled (should be scored). */
-  update(delta: number, playerX: number, playerY: number): number {
+  /** Advances all spawners and active projectiles. */
+  update(delta: number, playerX: number, playerY: number): void {
     this.arena.update(delta);
 
     this.safeLaneCenterAngleValue = Phaser.Math.Angle.Wrap(
@@ -411,12 +399,10 @@ export class ProjectileManager {
       }
     }
 
-    let escaped = 0;
-    escaped += stepPool(this.basicPool, delta, this.arena, playerX, playerY);
-    escaped += stepPool(this.zoomerPool, delta, this.arena, playerX, playerY);
-    escaped += stepStopWavePool(this.stopWavePool, delta);
-    escaped += stepPool(this.chaserPool, delta, this.arena, playerX, playerY);
-    return escaped;
+    stepPool(this.basicPool, delta, this.arena, playerX, playerY);
+    stepPool(this.zoomerPool, delta, this.arena, playerX, playerY);
+    stepStopWavePool(this.stopWavePool, delta);
+    stepPool(this.chaserPool, delta, this.arena, playerX, playerY);
   }
 
   /** Deactivates any Basic/Zoomer/Chaser projectile inside the slash hitbox. Stop Waves are immune to Slash. Returns how many were hit. */
