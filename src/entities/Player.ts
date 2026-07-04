@@ -19,6 +19,11 @@ const DASH_SPEED = 900;
 const DASH_DURATION_MS = 150;
 const DASH_COOLDOWN_MS = 200;
 const DASH_LOCKOUT_MS = DASH_DURATION_MS + DASH_COOLDOWN_MS;
+// Extra i-frames tacked onto the tail end of a dash, after the burst of
+// movement itself has already stopped - gives the player a beat to actually
+// be standing still in the clear before invincibility lapses, instead of it
+// cutting out the instant the dash's motion does.
+const DASH_IFRAME_TAIL_MS = 150;
 
 const SLASH_DURATION_MS = 120;
 const SLASH_COOLDOWN_MS = 500;
@@ -30,7 +35,7 @@ const STARTING_HP = 3;
 // Brief invincibility after taking a hit, separate from dash i-frames, so a
 // cluster of overlapping projectiles can't chain-damage you in the same
 // instant with zero chance to react.
-const HIT_INVINCIBILITY_MS = 1000;
+const HIT_INVINCIBILITY_MS = 700;
 const HIT_BLINK_INTERVAL_MS = 80;
 
 export interface SlashHitbox {
@@ -56,6 +61,7 @@ export class Player {
   private isDashing = false;
   private dashTimeRemainingMs = 0;
   private dashLockoutRemainingMs = 0;
+  private dashIframeTailRemainingMs = 0;
 
   private slashAngle = 0;
   private slashActiveRemainingMs = 0;
@@ -131,9 +137,13 @@ export class Player {
     return this.hp <= 0;
   }
 
-  /** True during dash i-frames OR the brief post-hit grace window - either source blocks normal contact damage. */
+  /**
+   * True during dash i-frames (including their brief tail after the dash's
+   * movement ends) OR the post-hit grace window - any of these blocks normal
+   * contact damage.
+   */
   get isInvincible(): boolean {
-    return this.isDashing || this.hitGraceRemainingMs > 0;
+    return this.isDashing || this.dashIframeTailRemainingMs > 0 || this.hitGraceRemainingMs > 0;
   }
 
   /** Whether a dash is currently active - Stop Wave only reacts to contact made while this is true. */
@@ -213,6 +223,7 @@ export class Player {
     this.dashTimeRemainingMs -= delta;
     if (this.dashTimeRemainingMs <= 0) {
       this.isDashing = false;
+      this.dashIframeTailRemainingMs = DASH_IFRAME_TAIL_MS;
       this.sprite.clearTint();
     }
   }
@@ -286,6 +297,9 @@ export class Player {
     if (this.dashLockoutRemainingMs > 0) {
       this.dashLockoutRemainingMs = Math.max(0, this.dashLockoutRemainingMs - delta);
     }
+    if (this.dashIframeTailRemainingMs > 0) {
+      this.dashIframeTailRemainingMs = Math.max(0, this.dashIframeTailRemainingMs - delta);
+    }
     if (this.slashCooldownRemainingMs > 0) {
       this.slashCooldownRemainingMs = Math.max(0, this.slashCooldownRemainingMs - delta);
     }
@@ -294,13 +308,14 @@ export class Player {
     }
   }
 
-  /** Blinks the sprite while the post-hit grace window is active, so the player can see they're currently safe. */
+  /** Blinks the sprite while the post-hit grace window or dash i-frame tail is active, so the player can see they're currently safe. */
   private updateHitGraceVisual(): void {
-    if (this.hitGraceRemainingMs <= 0) {
+    const remainingMs = Math.max(this.hitGraceRemainingMs, this.dashIframeTailRemainingMs);
+    if (remainingMs <= 0) {
       this.sprite.setAlpha(1);
       return;
     }
-    const blinkOn = Math.floor(this.hitGraceRemainingMs / HIT_BLINK_INTERVAL_MS) % 2 === 0;
+    const blinkOn = Math.floor(remainingMs / HIT_BLINK_INTERVAL_MS) % 2 === 0;
     this.sprite.setAlpha(blinkOn ? 0.35 : 1);
   }
 
