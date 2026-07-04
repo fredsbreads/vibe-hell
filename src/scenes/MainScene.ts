@@ -65,6 +65,7 @@ export class MainScene extends Phaser.Scene {
   private menuDownKey!: Phaser.Input.Keyboard.Key;
   private prevEscHeld = false;
   private prevConfirmHeld = false;
+  private prevCancelHeld = false;
   private prevMenuUpHeld = false;
   private prevMenuDownHeld = false;
   private restartHoldMs = 0;
@@ -85,6 +86,7 @@ export class MainScene extends Phaser.Scene {
     this.uiState = "playing";
     this.prevEscHeld = false;
     this.prevConfirmHeld = false;
+    this.prevCancelHeld = false;
     this.prevMenuUpHeld = false;
     this.prevMenuDownHeld = false;
     this.restartHoldMs = 0;
@@ -147,7 +149,7 @@ export class MainScene extends Phaser.Scene {
 
     this.menuOverlay = new MenuOverlay(this, width, height);
     this.menuHintText = this.add
-      .text(width / 2, height / 2 + 130, "Up/Down or D-Pad/Stick to select  ·  Enter/Cross confirm  ·  Esc/Options back", {
+      .text(width / 2, height / 2 + 130, "Up/Down or D-Pad/Stick to select  ·  Enter/Cross confirm  ·  Esc/Options/Circle back", {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#6a6a80",
@@ -234,13 +236,17 @@ export class MainScene extends Phaser.Scene {
   /**
    * Escape/Options is a context-sensitive "back" button: pauses while
    * playing, resumes while paused, and returns to the title while dead.
-   * While a menu is open, Up/Down (arrow keys, D-pad, or the left stick)
-   * move the highlighted option and Enter/Cross activates it - the standard
-   * "highlight + confirm" pattern, rather than a fixed key/button per menu
-   * item. R/Square is a separate direct Restart shortcut (held, to guard
-   * against an accidental press) that works in any uiState, not just while a
-   * menu is open. Polled with edge-detection (like PlayerInput) since Phaser
-   * doesn't expose gamepad button presses as keydown-style events.
+   * Circle is a dedicated cancel button matching PlayStation UX convention -
+   * while paused, it closes the menu and resumes play, same as Options would,
+   * but without also being the button that opened the pause menu in the
+   * first place. While a menu is open, Up/Down (arrow keys, D-pad, or the
+   * left stick) move the highlighted option and Enter/Cross activates it -
+   * the standard "highlight + confirm" pattern, rather than a fixed key/
+   * button per menu item. R/Square is a separate direct Restart shortcut
+   * (held, to guard against an accidental press) that works in any uiState,
+   * not just while a menu is open. Polled with edge-detection (like
+   * PlayerInput) since Phaser doesn't expose gamepad button presses as
+   * keydown-style events.
    */
   private pollMenuInputs(delta: number): void {
     const pad = this.input.gamepad?.pad1;
@@ -256,6 +262,13 @@ export class MainScene extends Phaser.Scene {
       } else {
         this.goToMainMenu();
       }
+    }
+
+    const cancelHeld = isPadButtonDown(pad, DualSenseMap.CIRCLE);
+    const cancelPressed = cancelHeld && !this.prevCancelHeld;
+    this.prevCancelHeld = cancelHeld;
+    if (cancelPressed && this.uiState === "paused") {
+      this.exitPause();
     }
 
     // Restart discards the current run, so it requires a brief hold rather than an
