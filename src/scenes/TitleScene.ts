@@ -12,9 +12,14 @@ const START_WAVE_REGISTRY_KEY = "startWave";
  * gamepad Cross press. Includes a start-wave stepper so a run can jump
  * straight into a later wave instead of always beginning at wave 1 - handy
  * for testing/demoing harder waves without playing through the early ones.
+ * The wave stepper and aim-mode toggle are also reachable from a gamepad
+ * (D-pad left/right and Triangle) so this screen doesn't require a mouse.
  */
 export class TitleScene extends Phaser.Scene {
   private prevCrossHeld = false;
+  private prevDpadLeftHeld = false;
+  private prevDpadRightHeld = false;
+  private prevTriangleHeld = false;
   private started = false;
   private startWave = MIN_START_WAVE;
   private startWaveText!: Phaser.GameObjects.Text;
@@ -28,6 +33,9 @@ export class TitleScene extends Phaser.Scene {
     const { width, height } = this.scale;
     this.started = false;
     this.prevCrossHeld = false;
+    this.prevDpadLeftHeld = false;
+    this.prevDpadRightHeld = false;
+    this.prevTriangleHeld = false;
     // Remembers the last-picked wave across visits to this screen (e.g. after a
     // Game Over -> Main Menu trip), via Phaser's registry, since a fresh create()
     // call would otherwise reset a plain instance field back to its default.
@@ -73,6 +81,14 @@ export class TitleScene extends Phaser.Scene {
     this.createWaveStepper(width / 2, height / 2 + 170);
     this.createAimModeToggle(width / 2, height / 2 + 210);
 
+    this.add
+      .text(width / 2, height / 2 + 245, "Arrows / D-Pad to adjust wave · Triangle to change aim", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#4a4a5a",
+      })
+      .setOrigin(0.5);
+
     this.input.keyboard!.once("keydown-ENTER", () => this.startGame());
     this.input.keyboard!.once("keydown-SPACE", () => this.startGame());
     this.input.keyboard!.on("keydown-LEFT", () => this.adjustStartWave(-1));
@@ -84,11 +100,31 @@ export class TitleScene extends Phaser.Scene {
     if (!pad) {
       return;
     }
+
     const crossHeld = pad.isButtonDown(DualSenseMap.CROSS);
     if (crossHeld && !this.prevCrossHeld) {
       this.startGame();
     }
     this.prevCrossHeld = crossHeld;
+
+    const dpadLeftHeld = pad.isButtonDown(DualSenseMap.DPAD_LEFT);
+    if (dpadLeftHeld && !this.prevDpadLeftHeld) {
+      this.adjustStartWave(-1);
+    }
+    this.prevDpadLeftHeld = dpadLeftHeld;
+
+    const dpadRightHeld = pad.isButtonDown(DualSenseMap.DPAD_RIGHT);
+    if (dpadRightHeld && !this.prevDpadRightHeld) {
+      this.adjustStartWave(1);
+    }
+    this.prevDpadRightHeld = dpadRightHeld;
+
+    const triangleHeld = pad.isButtonDown(DualSenseMap.TRIANGLE);
+    if (triangleHeld && !this.prevTriangleHeld) {
+      toggleAimMode();
+      this.refreshAimModeText();
+    }
+    this.prevTriangleHeld = triangleHeld;
   }
 
   private createWaveStepper(centerX: number, y: number): void {

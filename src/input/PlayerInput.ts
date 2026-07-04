@@ -4,6 +4,9 @@ import { getAimMode } from "../config/settings";
 
 const STICK_DEADZONE = 0.2;
 const TRIGGER_THRESHOLD = 0.5;
+// Minimum screen-pixel movement between frames to count as "the mouse was just
+// used", so a stationary cursor never fights an idle-but-connected gamepad.
+const MOUSE_MOVE_THRESHOLD = 2;
 
 /**
  * Fixed screen-space offset (from the bottom-right corner) of the virtual
@@ -50,6 +53,8 @@ export class PlayerInput {
   private prevDashHeld = false;
   private prevSlashHeld = false;
   private lastAimAngle = 0;
+  private prevPointerX: number | null = null;
+  private prevPointerY: number | null = null;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -82,6 +87,10 @@ export class PlayerInput {
     let dashHeld = false;
     let slashHeld = false;
 
+    // Candidate aim angle from the right stick this frame, or null if the pad
+    // isn't connected or its stick is resting in the deadzone.
+    let padAimAngle: number | null = null;
+
     if (pad) {
       moveX = applyDeadzone(pad.leftStick.x, STICK_DEADZONE);
       moveY = applyDeadzone(pad.leftStick.y, STICK_DEADZONE);
@@ -90,7 +99,7 @@ export class PlayerInput {
         const aimX = applyDeadzone(pad.rightStick.x, STICK_DEADZONE);
         const aimY = applyDeadzone(pad.rightStick.y, STICK_DEADZONE);
         if (aimX !== 0 || aimY !== 0) {
-          aimAngle = Math.atan2(aimY, aimX);
+          padAimAngle = Math.atan2(aimY, aimX);
         }
       }
 
@@ -112,6 +121,18 @@ export class PlayerInput {
 
     const pointer = this.scene.input.activePointer;
 
+    // Only treat the mouse as "just used" if it actually moved since last frame -
+    // a stationary cursor sitting over an old position shouldn't count as active
+    // input, or it'd permanently fight/override the gamepad (or vice versa)
+    // depending purely on which one happened to be checked first.
+    const mouseMoved =
+      this.prevPointerX !== null &&
+      this.prevPointerY !== null &&
+      (Math.abs(pointer.x - this.prevPointerX) > MOUSE_MOVE_THRESHOLD ||
+        Math.abs(pointer.y - this.prevPointerY) > MOUSE_MOVE_THRESHOLD);
+    this.prevPointerX = pointer.x;
+    this.prevPointerY = pointer.y;
+
     if (aimMode === "movement") {
       // Aim wherever you're currently moving instead of needing a separate aim
       // input - makes the game fully playable with just WASD + Space + J, no
@@ -121,7 +142,11 @@ export class PlayerInput {
       if (moveX !== 0 || moveY !== 0) {
         aimAngle = Math.atan2(moveY, moveX);
       }
-    } else if (!pad && aimMode === "virtualStick") {
+    } else if (padAimAngle !== null) {
+      // The stick actually moved this frame - it wins over the mouse outright,
+      // regardless of whether the mouse also happened to move.
+      aimAngle = padAimAngle;
+    } else if (mouseMoved && aimMode === "virtualStick") {
       // Aim from a fixed on-screen anchor to the mouse, instead of from the
       // player's (moving) position to the mouse. With player-relative aiming, the
       // mouse position needed to represent "aim east" keeps changing as the player
@@ -135,13 +160,14 @@ export class PlayerInput {
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
         aimAngle = Math.atan2(dy, dx);
       }
-    } else if (!pad) {
-      // Mouse aim is only a fallback for when there's no gamepad at all - if a pad is
-      // connected but its right stick is just resting in the deadzone, we should hold
-      // the last stick-commanded angle (aimAngle already defaults to lastAimAngle
-      // above), not snap to wherever the untouched mouse cursor happens to be. That
-      // fallthrough was what made the aim indicator feel "detached"/delayed: it'd jump
-      // to the mouse position every time the stick eased back toward center.
+    } else if (mouseMoved) {
+      // The mouse was just moved, so it takes over aiming even with a gamepad
+      // connected - only an idle mouse (no recent movement) yields to holding
+      // the last stick-commanded angle instead of snapping to a stale cursor
+      // position. That stick-priority-while-idle behavior is what keeps the
+      // aim indicator from feeling "detached"/delayed when the stick eases back
+      // toward center; letting mouse movement itself take priority is what lets
+      // the player actually switch back to mouse aim at will.
       const dx = pointer.worldX - playerX;
       const dy = pointer.worldY - playerY;
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {

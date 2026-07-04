@@ -54,6 +54,7 @@ export class MainScene extends Phaser.Scene {
 
   private uiState: UiState = "playing";
   private menuOverlay!: MenuOverlay;
+  private menuHintText!: Phaser.GameObjects.Text;
   private escKey!: Phaser.Input.Keyboard.Key;
   private confirmKey!: Phaser.Input.Keyboard.Key;
   private restartKey!: Phaser.Input.Keyboard.Key;
@@ -139,6 +140,16 @@ export class MainScene extends Phaser.Scene {
       .setOrigin(1, 1);
 
     this.menuOverlay = new MenuOverlay(this, width, height);
+    this.menuHintText = this.add
+      .text(width / 2, height / 2 + 130, "Enter/Cross confirm  ·  Esc/Options back  ·  M/Triangle main menu", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#6a6a80",
+        align: "center",
+      })
+      .setOrigin(0.5)
+      .setDepth(21)
+      .setVisible(false);
     this.restartHoldText = this.add
       .text(width / 2, height - 90, "", {
         fontFamily: "monospace",
@@ -291,6 +302,7 @@ export class MainScene extends Phaser.Scene {
       { label: "RESTART", onSelect: () => this.restartRun() },
       { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
     ]);
+    this.menuHintText.setVisible(true);
   }
 
   private exitPause(): void {
@@ -298,6 +310,7 @@ export class MainScene extends Phaser.Scene {
     this.physics.resume();
     this.tweens.resumeAll();
     this.menuOverlay.hide();
+    this.menuHintText.setVisible(false);
   }
 
   private enterGameOver(): void {
@@ -309,6 +322,7 @@ export class MainScene extends Phaser.Scene {
       { label: "RESTART", onSelect: () => this.restartRun() },
       { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
     ]);
+    this.menuHintText.setVisible(true);
   }
 
   private restartRun(): void {

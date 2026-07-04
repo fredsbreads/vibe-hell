@@ -14,4 +14,8 @@ export const DualSenseMap = {
   R2: 7,
   SHARE: 8,
   OPTIONS: 9,
+  DPAD_UP: 12,
+  DPAD_DOWN: 13,
+  DPAD_LEFT: 14,
+  DPAD_RIGHT: 15,
 } as const;
