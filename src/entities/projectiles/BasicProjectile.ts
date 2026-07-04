@@ -5,6 +5,11 @@ import { LinearProjectile } from "./LinearProjectile";
 export const BASIC_PROJECTILE_SPEED = 160;
 export const BASIC_PROJECTILE_RADIUS = 8;
 
+// Bouncing off walls means it has no guaranteed exit - without a cap it can
+// linger indefinitely if it never happens to bounce out. Capped at 10s so it
+// can't quietly accumulate over the course of a wave.
+const MAX_LIFETIME_MS = 10000;
+
 /**
  * A pooled Basic threat: aims at the player once on spawn, then travels in a
  * straight line and mirror-bounces off the arena wall, per the GDD's
@@ -14,10 +19,10 @@ export const BASIC_PROJECTILE_RADIUS = 8;
  */
 export class BasicProjectile extends LinearProjectile {
   constructor(scene: Phaser.Scene) {
-    super(scene, "basic-projectile", BASIC_PROJECTILE_SPEED, BASIC_PROJECTILE_RADIUS);
+    super(scene, "basic-projectile", BASIC_PROJECTILE_SPEED, BASIC_PROJECTILE_RADIUS, MAX_LIFETIME_MS);
   }
 
-  /** Moves and bounces off the arena wall. Returns true if it has drifted well past the wall and should be despawned. */
+  /** Moves and bounces off the arena wall. Returns true if it has drifted well past the wall, or lived past its 10s cap, and should be despawned. */
   step(delta: number, arena: Arena, _playerX: number, _playerY: number): boolean {
     if (!this.move(delta)) {
       return false;
@@ -43,6 +48,6 @@ export class BasicProjectile extends LinearProjectile {
       }
     }
 
-    return this.hasEscaped(arena);
+    return this.hasEscaped(arena) || this.hasExpired();
   }
 }

@@ -22,10 +22,21 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   protected vy = 0;
   protected telegraphRemainingMs = 0;
 
-  constructor(scene: Phaser.Scene, textureKey: string, speed: number, radius: number) {
+  private readonly maxLifetimeMs: number;
+  private lifetimeRemainingMs: number;
+
+  /**
+   * maxLifetimeMs is Infinity by default (no cap) - only threat types that can
+   * linger indefinitely by bouncing (Basic, Chaser) pass a real value. Zoomer
+   * doesn't bounce and already self-clears by exiting the arena, so it has no
+   * need for one.
+   */
+  constructor(scene: Phaser.Scene, textureKey: string, speed: number, radius: number, maxLifetimeMs = Infinity) {
     super(scene, 0, 0, textureKey);
     this.speed = speed;
     this.radius = radius;
+    this.maxLifetimeMs = maxLifetimeMs;
+    this.lifetimeRemainingMs = maxLifetimeMs;
     scene.add.existing(this);
     this.setActive(false);
     this.setVisible(false);
@@ -37,6 +48,7 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     this.vx = Math.cos(angle) * this.speed;
     this.vy = Math.sin(angle) * this.speed;
     this.telegraphRemainingMs = SPAWN_TELEGRAPH_MS;
+    this.lifetimeRemainingMs = this.maxLifetimeMs;
     this.setAlpha(TELEGRAPH_START_ALPHA);
     this.setActive(true);
     this.setVisible(true);
@@ -61,6 +73,8 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
       return false;
     }
 
+    this.lifetimeRemainingMs -= delta;
+
     const dt = delta / 1000;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
@@ -73,6 +87,16 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     const dist = Math.hypot(dx, dy);
     const angle = Math.atan2(dy, dx);
     return dist > arena.maxRadiusAtAngle(angle) + ESCAPE_MARGIN;
+  }
+
+  /**
+   * True once a capped-lifetime projectile has been alive (excluding its
+   * spawn telegraph) longer than maxLifetimeMs - a bouncing threat that never
+   * happens to escape on its own otherwise lingers indefinitely. Always false
+   * for types with no cap (maxLifetimeMs left at the Infinity default).
+   */
+  protected hasExpired(): boolean {
+    return this.lifetimeRemainingMs <= 0;
   }
 
   /**

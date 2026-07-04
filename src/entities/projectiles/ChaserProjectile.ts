@@ -5,18 +5,24 @@ import { LinearProjectile } from "./LinearProjectile";
 export const CHASER_PROJECTILE_SPEED = 260;
 export const CHASER_PROJECTILE_RADIUS = 7;
 
+// Re-aiming at each bounce means it almost never naturally escapes on its own
+// (see class doc below) - without a cap it would linger far longer than any
+// other type. Same 10s cap as Basic.
+const MAX_LIFETIME_MS = 10000;
+
 /**
  * A pooled Chaser threat: fast and straight-line like a Zoomer, but bounces
  * off the arena wall like Basic - except instead of a predictable mirror
  * reflection, it re-aims dead at the player's current position at the
  * instant of each bounce. It never settles into a fixed rebound path, so
  * unlike Basic/Zoomer it will rarely "naturally" fly off and score itself;
- * Slash or a well-timed Dash are the reliable counters. Slower than a pure
- * Zoomer to offset how much more threatening persistent re-aiming is.
+ * Slash, a well-timed Dash, or its own 10s lifetime cap are the reliable ways
+ * it goes away. Slower than a pure Zoomer to offset how much more threatening
+ * persistent re-aiming is.
  */
 export class ChaserProjectile extends LinearProjectile {
   constructor(scene: Phaser.Scene) {
-    super(scene, "chaser-projectile", CHASER_PROJECTILE_SPEED, CHASER_PROJECTILE_RADIUS);
+    super(scene, "chaser-projectile", CHASER_PROJECTILE_SPEED, CHASER_PROJECTILE_RADIUS, MAX_LIFETIME_MS);
   }
 
   step(delta: number, arena: Arena, playerX: number, playerY: number): boolean {
@@ -43,6 +49,6 @@ export class ChaserProjectile extends LinearProjectile {
       }
     }
 
-    return this.hasEscaped(arena);
+    return this.hasEscaped(arena) || this.hasExpired();
   }
 }
