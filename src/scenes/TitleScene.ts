@@ -1,27 +1,44 @@
 import Phaser from "phaser";
 import { DualSenseMap, isPadButtonDown } from "../input/DualSenseMap";
-import { getAimMode, toggleAimMode } from "../config/settings";
+import { getAimMode, cycleAimMode } from "../config/settings";
 
 const MIN_START_WAVE = 1;
 const MAX_START_WAVE = 20;
 const START_WAVE_REGISTRY_KEY = "startWave";
 
+/** How far the left stick must tilt to count as an Up/Down/Left/Right navigation press. */
+const STICK_THRESHOLD = 0.5;
+
+const FOCUS_COLOR = "#ffffff";
+const UNFOCUSED_COLOR = "#59f2c8";
+
+type FocusRow = 0 | 1;
+const WAVE_ROW: FocusRow = 0;
+const AIM_ROW: FocusRow = 1;
+const ROW_COUNT = 2;
+
 /**
  * The game's title screen, shown on boot and whenever the player backs out
  * from a Game Over. Starts MainScene on Enter/Space, a click on PLAY, or a
- * gamepad Cross press. Includes a start-wave stepper so a run can jump
- * straight into a later wave instead of always beginning at wave 1 - handy
- * for testing/demoing harder waves without playing through the early ones.
- * The wave stepper and aim-mode toggle are also reachable from a gamepad
- * (D-pad left/right and Triangle) so this screen doesn't require a mouse.
+ * gamepad Cross press.
+ *
+ * Below PLAY sit two adjustable rows - the start-wave stepper (handy for
+ * testing/demoing harder waves without playing through the early ones) and
+ * the aim-mode toggle. Up/Down (arrow keys, D-pad, or the left stick) moves
+ * a highlighted focus between these two rows, and Left/Right adjusts
+ * whichever one is focused - the same "select a row, then adjust it"
+ * pattern a console settings menu uses, rather than a fixed button doing a
+ * fixed thing regardless of context.
  */
 export class TitleScene extends Phaser.Scene {
   private prevCrossHeld = false;
+  private prevDpadUpHeld = false;
+  private prevDpadDownHeld = false;
   private prevDpadLeftHeld = false;
   private prevDpadRightHeld = false;
-  private prevTriangleHeld = false;
   private started = false;
   private startWave = MIN_START_WAVE;
+  private focusedRow: FocusRow = WAVE_ROW;
   private startWaveText!: Phaser.GameObjects.Text;
   private aimModeText!: Phaser.GameObjects.Text;
 
@@ -32,6 +49,7 @@ export class TitleScene extends Phaser.Scene {
   create(): void {
     const { width, height } = this.scale;
     this.started = false;
+    this.focusedRow = WAVE_ROW;
     // Seed from whatever's ACTUALLY currently held, not blindly false - this
     // screen is frequently entered via a gamepad Cross press (confirming
     // "Main Menu" from the pause overlay, or Restart-then-Main-Menu), and
@@ -42,9 +60,10 @@ export class TitleScene extends Phaser.Scene {
     // this screen ever had a chance to actually be looked at, let alone used.
     const pad = this.input.gamepad?.pad1;
     this.prevCrossHeld = isPadButtonDown(pad, DualSenseMap.CROSS);
+    this.prevDpadUpHeld = isPadButtonDown(pad, DualSenseMap.DPAD_UP);
+    this.prevDpadDownHeld = isPadButtonDown(pad, DualSenseMap.DPAD_DOWN);
     this.prevDpadLeftHeld = isPadButtonDown(pad, DualSenseMap.DPAD_LEFT);
     this.prevDpadRightHeld = isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT);
-    this.prevTriangleHeld = isPadButtonDown(pad, DualSenseMap.TRIANGLE);
     // Remembers the last-picked wave across visits to this screen (e.g. after a
     // Game Over -> Main Menu trip), via Phaser's registry, since a fresh create()
     // call would otherwise reset a plain instance field back to its default.
@@ -91,7 +110,7 @@ export class TitleScene extends Phaser.Scene {
     this.createAimModeToggle(width / 2, height / 2 + 210);
 
     this.add
-      .text(width / 2, height / 2 + 245, "Arrows / D-Pad to adjust wave · Triangle to change aim", {
+      .text(width / 2, height / 2 + 245, "Up/Down to select · Left/Right to adjust", {
         fontFamily: "monospace",
         fontSize: "11px",
         color: "#4a4a5a",
@@ -100,8 +119,12 @@ export class TitleScene extends Phaser.Scene {
 
     this.input.keyboard!.once("keydown-ENTER", () => this.startGame());
     this.input.keyboard!.once("keydown-SPACE", () => this.startGame());
-    this.input.keyboard!.on("keydown-LEFT", () => this.adjustStartWave(-1));
-    this.input.keyboard!.on("keydown-RIGHT", () => this.adjustStartWave(1));
+    this.input.keyboard!.on("keydown-UP", () => this.moveFocus(-1));
+    this.input.keyboard!.on("keydown-DOWN", () => this.moveFocus(1));
+    this.input.keyboard!.on("keydown-LEFT", () => this.adjustFocusedRow(-1));
+    this.input.keyboard!.on("keydown-RIGHT", () => this.adjustFocusedRow(1));
+
+    this.refreshFocusHighlight();
   }
 
   update(): void {
@@ -116,24 +139,29 @@ export class TitleScene extends Phaser.Scene {
     }
     this.prevCrossHeld = crossHeld;
 
-    const dpadLeftHeld = isPadButtonDown(pad, DualSenseMap.DPAD_LEFT);
+    const dpadUpHeld = isPadButtonDown(pad, DualSenseMap.DPAD_UP) || pad.leftStick.y < -STICK_THRESHOLD;
+    if (dpadUpHeld && !this.prevDpadUpHeld) {
+      this.moveFocus(-1);
+    }
+    this.prevDpadUpHeld = dpadUpHeld;
+
+    const dpadDownHeld = isPadButtonDown(pad, DualSenseMap.DPAD_DOWN) || pad.leftStick.y > STICK_THRESHOLD;
+    if (dpadDownHeld && !this.prevDpadDownHeld) {
+      this.moveFocus(1);
+    }
+    this.prevDpadDownHeld = dpadDownHeld;
+
+    const dpadLeftHeld = isPadButtonDown(pad, DualSenseMap.DPAD_LEFT) || pad.leftStick.x < -STICK_THRESHOLD;
     if (dpadLeftHeld && !this.prevDpadLeftHeld) {
-      this.adjustStartWave(-1);
+      this.adjustFocusedRow(-1);
     }
     this.prevDpadLeftHeld = dpadLeftHeld;
 
-    const dpadRightHeld = isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT);
+    const dpadRightHeld = isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT) || pad.leftStick.x > STICK_THRESHOLD;
     if (dpadRightHeld && !this.prevDpadRightHeld) {
-      this.adjustStartWave(1);
+      this.adjustFocusedRow(1);
     }
     this.prevDpadRightHeld = dpadRightHeld;
-
-    const triangleHeld = isPadButtonDown(pad, DualSenseMap.TRIANGLE);
-    if (triangleHeld && !this.prevTriangleHeld) {
-      toggleAimMode();
-      this.refreshAimModeText();
-    }
-    this.prevTriangleHeld = triangleHeld;
   }
 
   private createWaveStepper(centerX: number, y: number): void {
@@ -147,15 +175,23 @@ export class TitleScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     minusButton.on("pointerover", () => minusButton.setColor("#ffffff"));
     minusButton.on("pointerout", () => minusButton.setColor("#59f2c8"));
-    minusButton.on("pointerdown", () => this.adjustStartWave(-1));
+    minusButton.on("pointerdown", () => {
+      this.focusedRow = WAVE_ROW;
+      this.adjustStartWave(-1);
+    });
 
     this.startWaveText = this.add
       .text(centerX, y, "", {
         fontFamily: "monospace",
         fontSize: "16px",
-        color: "#e0e0f0",
+        color: UNFOCUSED_COLOR,
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    this.startWaveText.on("pointerdown", () => {
+      this.focusedRow = WAVE_ROW;
+      this.refreshFocusHighlight();
+    });
 
     const plusButton = this.add
       .text(centerX + 110, y, "+", {
@@ -167,34 +203,58 @@ export class TitleScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     plusButton.on("pointerover", () => plusButton.setColor("#ffffff"));
     plusButton.on("pointerout", () => plusButton.setColor("#59f2c8"));
-    plusButton.on("pointerdown", () => this.adjustStartWave(1));
+    plusButton.on("pointerdown", () => {
+      this.focusedRow = WAVE_ROW;
+      this.adjustStartWave(1);
+    });
 
     this.refreshStartWaveText();
   }
 
   /**
    * Cycles between the three aim modes (see settings.ts: free / virtualStick /
-   * movement) on click. Persisted via settings.ts so it's remembered on the
-   * next visit, not just this session.
+   * movement) - Left/Right while this row is focused, or a click. Persisted
+   * via settings.ts so it's remembered on the next visit, not just this
+   * session.
    */
   private createAimModeToggle(centerX: number, y: number): void {
     this.aimModeText = this.add
       .text(centerX, y, "", {
         fontFamily: "monospace",
         fontSize: "16px",
-        color: "#59f2c8",
+        color: UNFOCUSED_COLOR,
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
-    this.aimModeText.on("pointerover", () => this.aimModeText.setColor("#ffffff"));
-    this.aimModeText.on("pointerout", () => this.aimModeText.setColor("#59f2c8"));
     this.aimModeText.on("pointerdown", () => {
-      toggleAimMode();
+      this.focusedRow = AIM_ROW;
+      cycleAimMode(1);
       this.refreshAimModeText();
+      this.refreshFocusHighlight();
     });
 
     this.refreshAimModeText();
+  }
+
+  private moveFocus(delta: number): void {
+    this.focusedRow = (((this.focusedRow + delta) % ROW_COUNT) + ROW_COUNT) as FocusRow;
+    this.refreshFocusHighlight();
+  }
+
+  private adjustFocusedRow(delta: 1 | -1): void {
+    if (this.focusedRow === WAVE_ROW) {
+      this.adjustStartWave(delta);
+    } else {
+      cycleAimMode(delta);
+      this.refreshAimModeText();
+    }
+  }
+
+  /** Colors whichever row is currently focused white, and the other row teal - mirrors the pause menu's highlight convention. */
+  private refreshFocusHighlight(): void {
+    this.startWaveText.setColor(this.focusedRow === WAVE_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
+    this.aimModeText.setColor(this.focusedRow === AIM_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
   }
 
   private refreshAimModeText(): void {
