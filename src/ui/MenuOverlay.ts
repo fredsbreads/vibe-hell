@@ -7,6 +7,11 @@ export interface MenuButton {
 
 const BACKDROP_DEPTH = 20;
 const TEXT_DEPTH = 21;
+// Minimum screen-pixel movement between frames to count as "the mouse was just
+// used" - otherwise a cursor merely resting over a button (e.g. left over from
+// an earlier click, while the player has since switched to keyboard/gamepad)
+// would keep re-stealing focus back onto itself every frame.
+const MOUSE_MOVE_THRESHOLD = 2;
 
 /**
  * A reusable full-screen dimmed overlay with a title, optional subtitle, and
@@ -21,6 +26,16 @@ export class MenuOverlay {
   private readonly titleText: Phaser.GameObjects.Text;
   private readonly subtitleText: Phaser.GameObjects.Text;
   private buttonTexts: Phaser.GameObjects.Text[] = [];
+  private buttons: MenuButton[] = [];
+  /**
+   * Which button is currently highlighted - the single source of truth for
+   * both mouse hover and keyboard/gamepad up-down navigation, so a controller
+   * user sees exactly the same highlight a mouse user would get by hovering,
+   * and moving the mouse re-syncs focus back to whatever it's over.
+   */
+  private focusedIndex = 0;
+  private prevPointerX: number | null = null;
+  private prevPointerY: number | null = null;
 
   constructor(scene: Phaser.Scene, width: number, height: number) {
     this.scene = scene;
@@ -57,6 +72,14 @@ export class MenuOverlay {
     this.titleText.setVisible(true).setText(title);
     this.subtitleText.setVisible(subtitle.length > 0).setText(subtitle);
 
+    this.buttons = buttons;
+    this.focusedIndex = 0;
+    // Reset so the cursor's current resting position (e.g. left over from the
+    // click that opened this menu) doesn't immediately register as "mouse
+    // just moved" on the very first update() and steal focus off button 0.
+    this.prevPointerX = null;
+    this.prevPointerY = null;
+
     const startY = this.subtitleText.y + (subtitle.length > 0 ? 50 : 30);
     buttons.forEach((button, i) => {
       const text = this.scene.add
@@ -75,26 +98,55 @@ export class MenuOverlay {
     });
   }
 
+  /** Moves the highlighted button by delta (wrapping), for keyboard/gamepad up-down navigation. */
+  moveFocus(delta: number): void {
+    const count = this.buttonTexts.length;
+    if (count === 0) {
+      return;
+    }
+    this.focusedIndex = ((this.focusedIndex + delta) % count + count) % count;
+  }
+
+  /** Activates whichever button is currently highlighted, same as clicking it. */
+  confirmFocused(): void {
+    this.buttons[this.focusedIndex]?.onSelect();
+  }
+
   /**
-   * Re-derives each button's hover color from the pointer's current position
-   * every frame, rather than trusting Phaser's pointerover/pointerout events
-   * alone. Those events only fire on an actual pointermove/pointerdown - if
-   * the browser drops one (tab loses focus mid-hover, a fast physical mouse
-   * flick coalesced into one big jump, buttons destroyed and recreated at the
-   * same spot under a stationary cursor, etc.) a button can end up stuck
-   * showing the hover color with no future event left to correct it. Polling
-   * the pointer position instead makes the highlight self-correcting - it can
-   * never be more than one frame stale.
+   * Re-derives the highlight from the pointer's current position every frame,
+   * rather than trusting Phaser's pointerover/pointerout events alone - those
+   * only fire on an actual pointermove/pointerdown, so a browser-dropped event
+   * (tab loses focus mid-hover, a fast mouse flick coalesced into one big
+   * jump, buttons recreated under a stationary cursor, etc.) could otherwise
+   * leave a button stuck showing the hover color with nothing left to correct
+   * it. Hovering only steals focus if the mouse actually moved this frame -
+   * otherwise a cursor merely resting over some button (left over from
+   * whatever click opened this menu) would fight keyboard/gamepad navigation
+   * by re-claiming focus back onto itself every single frame.
    */
   update(): void {
     if (this.buttonTexts.length === 0) {
       return;
     }
     const pointer = this.scene.input.activePointer;
-    for (const text of this.buttonTexts) {
-      const hovered = text.getBounds().contains(pointer.x, pointer.y);
-      text.setColor(hovered ? "#ffffff" : "#59f2c8");
+    const mouseMoved =
+      this.prevPointerX !== null &&
+      this.prevPointerY !== null &&
+      (Math.abs(pointer.x - this.prevPointerX) > MOUSE_MOVE_THRESHOLD ||
+        Math.abs(pointer.y - this.prevPointerY) > MOUSE_MOVE_THRESHOLD);
+    this.prevPointerX = pointer.x;
+    this.prevPointerY = pointer.y;
+
+    if (mouseMoved) {
+      this.buttonTexts.forEach((text, i) => {
+        if (text.getBounds().contains(pointer.x, pointer.y)) {
+          this.focusedIndex = i;
+        }
+      });
     }
+    this.buttonTexts.forEach((text, i) => {
+      text.setColor(i === this.focusedIndex ? "#ffffff" : "#59f2c8");
+    });
   }
 
   hide(): void {
@@ -109,5 +161,6 @@ export class MenuOverlay {
       text.destroy();
     }
     this.buttonTexts = [];
+    this.buttons = [];
   }
 }

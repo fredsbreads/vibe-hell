@@ -23,6 +23,9 @@ const ARENA_ROTATION_RAD_PER_MS = (Math.PI * 2) / 30000;
 /** How long R (or gamepad Square) must be held while paused/game-over before it triggers a restart. */
 const RESTART_HOLD_DURATION_MS = 500;
 
+/** How far the left stick must tilt vertically to count as an Up/Down menu-navigation press. */
+const MENU_STICK_THRESHOLD = 0.5;
+
 /** Debug-cyclable arena shapes (key 4), demonstrating the shape abstraction beyond the default circle. */
 const ARENA_SHAPE_CYCLE: Array<{ label: string; build: (bounds: ArenaBounds) => ArenaShape }> = [
   { label: "Circle", build: (bounds) => new CircleArena(bounds) },
@@ -58,10 +61,12 @@ export class MainScene extends Phaser.Scene {
   private escKey!: Phaser.Input.Keyboard.Key;
   private confirmKey!: Phaser.Input.Keyboard.Key;
   private restartKey!: Phaser.Input.Keyboard.Key;
-  private mainMenuKey!: Phaser.Input.Keyboard.Key;
+  private menuUpKey!: Phaser.Input.Keyboard.Key;
+  private menuDownKey!: Phaser.Input.Keyboard.Key;
   private prevEscHeld = false;
   private prevConfirmHeld = false;
-  private prevMainMenuHeld = false;
+  private prevMenuUpHeld = false;
+  private prevMenuDownHeld = false;
   private restartHoldMs = 0;
   private restartHoldText!: Phaser.GameObjects.Text;
 
@@ -80,7 +85,8 @@ export class MainScene extends Phaser.Scene {
     this.uiState = "playing";
     this.prevEscHeld = false;
     this.prevConfirmHeld = false;
-    this.prevMainMenuHeld = false;
+    this.prevMenuUpHeld = false;
+    this.prevMenuDownHeld = false;
     this.restartHoldMs = 0;
     // Restart passes { startWave: this.startWave } explicitly (see restartRun) so a
     // jumped-to wave survives a restart; falls back to 1 if launched with no data at all.
@@ -141,7 +147,7 @@ export class MainScene extends Phaser.Scene {
 
     this.menuOverlay = new MenuOverlay(this, width, height);
     this.menuHintText = this.add
-      .text(width / 2, height / 2 + 130, "Enter/Cross confirm  ·  Esc/Options back  ·  M/Triangle main menu", {
+      .text(width / 2, height / 2 + 130, "Up/Down or D-Pad/Stick to select  ·  Enter/Cross confirm  ·  Esc/Options back", {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#6a6a80",
@@ -162,7 +168,8 @@ export class MainScene extends Phaser.Scene {
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.confirmKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
-    this.mainMenuKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.menuUpKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
+    this.menuDownKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
 
     this.setupDebugSpawnToggles();
   }
@@ -227,10 +234,13 @@ export class MainScene extends Phaser.Scene {
   /**
    * Escape/Options is a context-sensitive "back" button: pauses while
    * playing, resumes while paused, and returns to the title while dead.
-   * Enter/Cross confirms the primary action (Resume, or Restart on Game
-   * Over); R/Square is a direct Restart shortcut in either menu state.
-   * Polled with edge-detection (like PlayerInput) since Phaser doesn't
-   * expose gamepad button presses as keydown-style events.
+   * While a menu is open, Up/Down (arrow keys, D-pad, or the left stick)
+   * move the highlighted option and Enter/Cross activates it - the standard
+   * "highlight + confirm" pattern, rather than a fixed key/button per menu
+   * item. R/Square is a separate direct Restart shortcut (held, to guard
+   * against an accidental press) that works in any uiState, not just while a
+   * menu is open. Polled with edge-detection (like PlayerInput) since Phaser
+   * doesn't expose gamepad button presses as keydown-style events.
    */
   private pollMenuInputs(delta: number): void {
     const pad = this.input.gamepad?.pad1;
@@ -274,22 +284,27 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
+    const stickY = pad?.leftStick.y ?? 0;
+    const upHeld = this.menuUpKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_UP) || stickY < -MENU_STICK_THRESHOLD;
+    const upPressed = upHeld && !this.prevMenuUpHeld;
+    this.prevMenuUpHeld = upHeld;
+    if (upPressed) {
+      this.menuOverlay.moveFocus(-1);
+    }
+
+    const downHeld =
+      this.menuDownKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_DOWN) || stickY > MENU_STICK_THRESHOLD;
+    const downPressed = downHeld && !this.prevMenuDownHeld;
+    this.prevMenuDownHeld = downHeld;
+    if (downPressed) {
+      this.menuOverlay.moveFocus(1);
+    }
+
     const confirmHeld = this.confirmKey.isDown || isPadButtonDown(pad, DualSenseMap.CROSS);
     const confirmPressed = confirmHeld && !this.prevConfirmHeld;
     this.prevConfirmHeld = confirmHeld;
     if (confirmPressed) {
-      if (this.uiState === "paused") {
-        this.exitPause();
-      } else if (this.uiState === "gameOver") {
-        this.restartRun();
-      }
-    }
-
-    const mainMenuHeld = this.mainMenuKey.isDown || isPadButtonDown(pad, DualSenseMap.TRIANGLE);
-    const mainMenuPressed = mainMenuHeld && !this.prevMainMenuHeld;
-    this.prevMainMenuHeld = mainMenuHeld;
-    if (mainMenuPressed) {
-      this.goToMainMenu();
+      this.menuOverlay.confirmFocused();
     }
   }
 
