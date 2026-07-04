@@ -97,6 +97,17 @@ export class Player {
     });
   }
 
+  /**
+   * Re-syncs input edge-detection to whatever's currently held - call this
+   * right after leaving a paused state (or right after constructing a fresh
+   * Player), so a button still held from confirming a menu (e.g. Cross for
+   * both "Resume"/"Restart" and Dash) doesn't fire that in-game action the
+   * instant control returns to gameplay.
+   */
+  resyncInputState(): void {
+    this.input.resyncHeldState(this.sprite.x, this.sprite.y);
+  }
+
   update(delta: number): void {
     const state = this.input.read(this.sprite.x, this.sprite.y);
     this.aimAngle = state.aimAngle;

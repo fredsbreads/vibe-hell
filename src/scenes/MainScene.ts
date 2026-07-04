@@ -84,11 +84,6 @@ export class MainScene extends Phaser.Scene {
     // reset here or a "restart" would silently carry over stale state.
     this.threatsEndured = 0;
     this.uiState = "playing";
-    this.prevEscHeld = false;
-    this.prevConfirmHeld = false;
-    this.prevCancelHeld = false;
-    this.prevMenuUpHeld = false;
-    this.prevMenuDownHeld = false;
     this.restartHoldMs = 0;
     // Restart passes { startWave: this.startWave } explicitly (see restartRun) so a
     // jumped-to wave survives a restart; falls back to 1 if launched with no data at all.
@@ -109,6 +104,12 @@ export class MainScene extends Phaser.Scene {
     this.virtualStickGraphic = this.add.graphics().setScrollFactor(0).setDepth(15);
 
     this.player = new Player(this, arenaBounds.centerX, arenaBounds.centerY, this.arena);
+    // A restart can happen while Cross (or Square) is still physically held
+    // down from confirming Restart in the menu - without this, the brand new
+    // Player's dash edge-detection would start blind (assume nothing was
+    // held) and misread that still-held button as a fresh dash the instant
+    // the new run begins.
+    this.player.resyncInputState();
     this.projectileManager = new ProjectileManager(this, this.arena);
     this.waveManager = new WaveManager(this.projectileManager, this.startWave);
 
@@ -172,6 +173,18 @@ export class MainScene extends Phaser.Scene {
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.menuUpKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
     this.menuDownKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+
+    // Seed from whatever's ACTUALLY currently held, not blindly false - this
+    // scene can be (re)entered via a gamepad Cross press (confirming Restart,
+    // or arriving fresh right as MainScene starts), and a still-held button
+    // read as false-to-true here would misfire as a brand new confirm/cancel
+    // press the instant this scene starts polling.
+    const pad = this.input.gamepad?.pad1;
+    this.prevEscHeld = this.escKey.isDown || isPadButtonDown(pad, DualSenseMap.OPTIONS);
+    this.prevConfirmHeld = this.confirmKey.isDown || isPadButtonDown(pad, DualSenseMap.CROSS);
+    this.prevCancelHeld = isPadButtonDown(pad, DualSenseMap.CIRCLE);
+    this.prevMenuUpHeld = this.menuUpKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_UP);
+    this.prevMenuDownHeld = this.menuDownKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_DOWN);
 
     this.setupDebugSpawnToggles();
   }
@@ -339,6 +352,10 @@ export class MainScene extends Phaser.Scene {
     this.tweens.resumeAll();
     this.menuOverlay.hide();
     this.menuHintText.setVisible(false);
+    // Whatever button confirmed "Resume" (Cross/Enter) may still be physically
+    // held for a frame or two - resync so Player doesn't mistake that same
+    // still-held button for a fresh dash/slash press the instant play resumes.
+    this.player.resyncInputState();
   }
 
   private enterGameOver(): void {

@@ -186,4 +186,18 @@ export class PlayerInput {
 
     return { moveX, moveY, aimAngle, dashHeld, dashPressed, slashHeld, slashPressed };
   }
+
+  /**
+   * Re-syncs dash/slash edge-detection to whatever's currently held, without
+   * treating it as a fresh press. Dash and Slash share buttons with menu
+   * confirm (Cross/Enter and click), and read() isn't called at all while
+   * paused - so without this, resuming with the same button still held would
+   * see dashHeld/slashHeld flip from their stale pre-pause value to true with
+   * no edge in between, firing an action the instant gameplay resumes that
+   * the player only meant as a menu confirm. Call this right after leaving a
+   * paused state.
+   */
+  resyncHeldState(playerX: number, playerY: number): void {
+    this.read(playerX, playerY);
+  }
 }

@@ -32,10 +32,19 @@ export class TitleScene extends Phaser.Scene {
   create(): void {
     const { width, height } = this.scale;
     this.started = false;
-    this.prevCrossHeld = false;
-    this.prevDpadLeftHeld = false;
-    this.prevDpadRightHeld = false;
-    this.prevTriangleHeld = false;
+    // Seed from whatever's ACTUALLY currently held, not blindly false - this
+    // screen is frequently entered via a gamepad Cross press (confirming
+    // "Main Menu" from the pause overlay, or Restart-then-Main-Menu), and
+    // that same physical button can still be held for a frame or two after
+    // the scene switch. Seeding prevCrossHeld to false in that situation
+    // would read the still-held Cross as a brand new press and immediately
+    // call startGame() again, bouncing straight back into a fresh run before
+    // this screen ever had a chance to actually be looked at, let alone used.
+    const pad = this.input.gamepad?.pad1;
+    this.prevCrossHeld = isPadButtonDown(pad, DualSenseMap.CROSS);
+    this.prevDpadLeftHeld = isPadButtonDown(pad, DualSenseMap.DPAD_LEFT);
+    this.prevDpadRightHeld = isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT);
+    this.prevTriangleHeld = isPadButtonDown(pad, DualSenseMap.TRIANGLE);
     // Remembers the last-picked wave across visits to this screen (e.g. after a
     // Game Over -> Main Menu trip), via Phaser's registry, since a fresh create()
     // call would otherwise reset a plain instance field back to its default.
