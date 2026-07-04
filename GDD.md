@@ -75,12 +75,16 @@ To ensure the game loop remains 100% skill-winnable, the perimeter spawner algor
 
 ### Procedural Difficulty Scaling
 
-The game uses a global `DifficultyMultiplier` state which increments by 15% (+0.15) at the start of every wave.
+Difficulty scales along two independent axes so a single wave transition never compounds both at once: a global `DifficultyMultiplier` "pace" that steps up 15% (+0.15) on every wave, and the threat roster, which grows on its own schedule. Whenever a wave introduces a new threat type, the pace holds steady for that wave instead of also stepping up.
 
-- **Wave 1–2:** Spawns Basic projectiles only. Low speed, low density.
-- **Wave 3:** Introduces Zoomers. Scaling speeds up.
-- **Wave 4+:** Introduces Stop Waves. Full threat matrix enabled. Spawn frequency increases.
-- **Intensity Cap:** Multiplier scaling plateaus at Wave 10 to ensure balanced processing boundaries.
+- **Wave 1:** Spawns Basic projectiles only.
+- **Wave 2:** Introduces Zoomers. Pace holds steady.
+- **Wave 3:** Pace steps up.
+- **Wave 4:** Introduces Chasers. Pace holds steady.
+- **Wave 5:** Pace steps up.
+- **Wave 6:** Introduces Stop Waves. Full threat matrix enabled. Pace holds steady.
+- **Wave 7+:** Pace steps up every wave.
+- **Intensity Cap:** Multiplier scaling plateaus after 10 pace steps (Wave 12) to ensure balanced processing boundaries.
 
 ### Scoring Configuration
 

@@ -4,22 +4,25 @@ const WAVE_DURATION_MS = 45000;
 const INTERMISSION_DURATION_MS = 3000;
 
 const DIFFICULTY_STEP = 0.15;
-const DIFFICULTY_PLATEAU_WAVE = 10;
+const DIFFICULTY_PLATEAU_PACE_STEP = 10;
 
 /** Waves at which each harder threat type first joins the fight - basic is always active from wave 1. */
-const ZOOMER_INTRODUCED_AT_WAVE = 3;
+const ZOOMER_INTRODUCED_AT_WAVE = 2;
 const CHASER_INTRODUCED_AT_WAVE = 4;
-const STOP_WAVE_INTRODUCED_AT_WAVE = 5;
+const STOP_WAVE_INTRODUCED_AT_WAVE = 6;
+const INTRODUCTION_WAVES = [ZOOMER_INTRODUCED_AT_WAVE, CHASER_INTRODUCED_AT_WAVE, STOP_WAVE_INTRODUCED_AT_WAVE];
 
 export type WavePhase = "active" | "intermission";
 
 /**
  * Drives the GDD's core progression loop: 45s of active survival, then a
  * 3s "Breather Window" intermission that wipes the field and shows a
- * completion banner, before the next (harder) wave begins. Difficulty
- * scales via ProjectileManager's spawn-frequency multiplier (+15%/wave,
- * plateauing at wave 10) and by introducing tougher threat types on a
- * schedule, per the GDD's wave 1-2 / 3 / 4+ progression.
+ * completion banner, before the next (harder) wave begins. Difficulty scales
+ * along two independent axes so a single wave transition never does both at
+ * once: a spawn-frequency "pace" that steps up +15% on every wave except the
+ * ones where a new threat type is introduced (those waves hold pace steady),
+ * plateauing after 10 pace steps; and the threat roster itself, which grows
+ * on its own schedule (Zoomer at wave 2, Chaser at wave 4, Stop Wave at wave 6).
  */
 export class WaveManager {
   private wave = 1;
@@ -77,8 +80,8 @@ export class WaveManager {
   }
 
   private applyWaveConfig(): void {
-    const scalingWave = Math.min(this.wave, DIFFICULTY_PLATEAU_WAVE);
-    const multiplier = 1 + DIFFICULTY_STEP * (scalingWave - 1);
+    const paceStep = Math.min(this.paceStepForWave(this.wave), DIFFICULTY_PLATEAU_PACE_STEP);
+    const multiplier = 1 + DIFFICULTY_STEP * (paceStep - 1);
     this.projectileManager.setDifficultyMultiplier(multiplier);
 
     this.projectileManager.setBasicSpawningEnabled(true);
@@ -89,5 +92,15 @@ export class WaveManager {
     // Re-randomize the Safe Lane's sweep speed/direction every wave, so its motion
     // isn't identical wave-to-wave or run-to-run.
     this.projectileManager.rerollSafeLaneMotion();
+  }
+
+  /**
+   * Pace advances by one step per wave, except on waves that introduce a new
+   * threat type - those hold the previous wave's pace so the roster grows
+   * without a simultaneous frequency bump.
+   */
+  private paceStepForWave(wave: number): number {
+    const introWavesSoFar = INTRODUCTION_WAVES.filter((introWave) => introWave <= wave).length;
+    return 1 + wave - introWavesSoFar;
   }
 }
