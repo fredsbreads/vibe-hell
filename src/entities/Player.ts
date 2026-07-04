@@ -30,7 +30,7 @@ const STARTING_HP = 3;
 // Brief invincibility after taking a hit, separate from dash i-frames, so a
 // cluster of overlapping projectiles can't chain-damage you in the same
 // instant with zero chance to react.
-const HIT_INVINCIBILITY_MS = 700;
+const HIT_INVINCIBILITY_MS = 1000;
 const HIT_BLINK_INTERVAL_MS = 80;
 
 export interface SlashHitbox {
