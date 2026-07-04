@@ -17,8 +17,12 @@ const BASIC_BASE_SPAWN_INTERVAL_MS = 1500;
 const ZOOMER_POOL_SIZE = 100;
 const ZOOMER_BASE_SPAWN_INTERVAL_MS = 1000;
 
-const STOP_WAVE_POOL_SIZE = 30;
-const STOP_WAVE_BASE_SPAWN_INTERVAL_MS = 2500;
+// Small pool and longer interval than the other types deliberately: each Stop
+// Wave is now a full-arena-spanning sweep, an "event" rather than a bullet, so
+// having many active at once would be both visually chaotic and nearly
+// impossible to route around all of simultaneously.
+const STOP_WAVE_POOL_SIZE = 6;
+const STOP_WAVE_BASE_SPAWN_INTERVAL_MS = 6000;
 
 const CHASER_POOL_SIZE = 60;
 const CHASER_BASE_SPAWN_INTERVAL_MS = 1800;
@@ -149,6 +153,67 @@ function checkContactOnPool(
     }
   }
   return damage;
+}
+
+// Stop Wave doesn't fit the LinearProjectile model (circular hitbox, escape
+// by distance-from-center) - it's a full-width sweeping bar with a gap, so it
+// gets its own spawn/step/collision helpers rather than reusing the generic
+// ones above.
+
+function findInactiveStopWave(pool: StopWaveProjectile[]): StopWaveProjectile | undefined {
+  return pool.find((p) => !p.active);
+}
+
+/** Spawns on the perimeter like everything else, but travels straight across the arena rather than homing on the player. */
+function spawnStopWave(
+  wave: StopWaveProjectile,
+  arena: Arena,
+  playerX: number,
+  playerY: number,
+  safeLaneCenterAngle: number,
+): void {
+  const playerAngle = Math.atan2(playerY - arena.bounds.centerY, playerX - arena.bounds.centerX);
+  const angle = pickSafeSpawnAngle(playerAngle, safeLaneCenterAngle);
+  const spawnPoint = arena.boundaryPointAtAngle(angle);
+  const travelAngle = angle + Math.PI;
+  wave.activate(spawnPoint.x, spawnPoint.y, travelAngle, arena);
+}
+
+function stepStopWavePool(pool: StopWaveProjectile[], delta: number): number {
+  let escaped = 0;
+  for (const wave of pool) {
+    if (!wave.active) {
+      continue;
+    }
+    if (wave.step(delta)) {
+      wave.deactivate();
+      escaped++;
+    }
+  }
+  return escaped;
+}
+
+/**
+ * Unlike checkContactOnPool, contact does NOT deactivate the wave - it's a
+ * persistent hazard you get out of the way of, not an obstacle destroyed by
+ * touching it. Returns how many waves the player is currently overlapping in
+ * their solid (non-gap) section.
+ */
+function checkStopWaveContact(
+  pool: StopWaveProjectile[],
+  playerX: number,
+  playerY: number,
+  playerRadius: number,
+  onHit: (x: number, y: number) => void,
+): number {
+  let hits = 0;
+  for (const wave of pool) {
+    if (wave.checkCollision(playerX, playerY, playerRadius)) {
+      onHit(playerX, playerY);
+      hits++;
+    }
+  }
+  return hits;
 }
 
 /**
@@ -310,9 +375,9 @@ export class ProjectileManager {
     if (this.stopWaveSpawningEnabled) {
       this.stopWaveSpawnTimerMs -= delta;
       if (this.stopWaveSpawnTimerMs <= 0) {
-        const projectile = findInactive(this.stopWavePool);
-        if (projectile) {
-          spawnOnPerimeter(projectile, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
+        const wave = findInactiveStopWave(this.stopWavePool);
+        if (wave) {
+          spawnStopWave(wave, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
         }
         this.stopWaveSpawnTimerMs = STOP_WAVE_BASE_SPAWN_INTERVAL_MS / this.difficultyMultiplier;
       }
@@ -332,7 +397,7 @@ export class ProjectileManager {
     let escaped = 0;
     escaped += stepPool(this.basicPool, delta, this.arena, playerX, playerY);
     escaped += stepPool(this.zoomerPool, delta, this.arena, playerX, playerY);
-    escaped += stepPool(this.stopWavePool, delta, this.arena, playerX, playerY);
+    escaped += stepStopWavePool(this.stopWavePool, delta);
     escaped += stepPool(this.chaserPool, delta, this.arena, playerX, playerY);
     return escaped;
   }
@@ -361,12 +426,16 @@ export class ProjectileManager {
   }
 
   /**
-   * Stop Waves are a dash-specific hard counter, not a general obstacle: only call
-   * this while the player is dashing (see MainScene) - contact made while not
-   * dashing should have no effect at all, not even a normal (non-invincible) hit.
+   * Stop Wave damages on contact with its solid section regardless of dash
+   * state - it bypasses dash i-frames entirely, unlike Basic/Zoomer/Chaser.
+   * Unlike those types, contact doesn't deactivate it: it's a persistent
+   * sweeping hazard, not something destroyed by touching it, so call this
+   * every frame (see MainScene, which gates it behind the general post-hit
+   * grace window instead, to avoid re-damaging every frame of an ongoing
+   * overlap while the bar sweeps past).
    */
   checkStopWaveCollisions(playerX: number, playerY: number, playerRadius: number): number {
     const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, HIT_POP_COLOR);
-    return checkContactOnPool(this.stopWavePool, playerX, playerY, playerRadius, onHit);
+    return checkStopWaveContact(this.stopWavePool, playerX, playerY, playerRadius, onHit);
   }
 }

@@ -18,7 +18,7 @@ The game decouples player movement from player aiming to create a highly tactica
 | --- | --- | --- |
 | 1. Basic | Medium speed; tracks player; bounces off the stadium walls. | Evade via movement, or use a timed directional Slash to instantly deactivate it. |
 | 2. Zoomer | Highly fast; fires in straight, linear trajectories. | Execute a timed Dash to utilize invincibility frames (i-frames) and phase through it. |
-| 3. Stop Wave | Large, slow-moving barrier/wave. | IMMUNE TO SLASH. Bypasses Dash i-frames completely. Must walk normally/position around it. |
+| 3. Stop Wave | A straight bar spanning the full width of the arena, sweeping from one side clean across to the opposite side. Carries exactly one gap - a passable segment of its own length, randomized and telegraphed before the sweep begins. Not destroyed by contact; it's a persistent hazard, not an obstacle. | IMMUNE TO SLASH. Bypasses Dash i-frames completely - damages on contact with the solid section regardless of dash state. Read the telegraph, move to align with the gap, hold that position as it sweeps past. |
 | 4. Chaser | Fast, like a Zoomer, but bounces off the stadium walls; unlike Basic's predictable mirror bounce, it re-aims dead at the player's current position at the instant of each bounce, so it keeps re-committing to the chase instead of settling into a fixed rebound path. Slower than a pure Zoomer to offset the extra threat of persistent re-aiming. | Execute a timed Dash to phase through it (i-frames), or use a timed directional Slash to instantly deactivate it. Not a hard counter type - normal contact deals 1 HP like Basic/Zoomer. |
 
 ## 3. Player Character Specification & Input Layout

@@ -9,7 +9,6 @@ import { CircleArena } from "../arena/CircleArena";
 import { PolygonArena } from "../arena/PolygonArena";
 import { BASIC_PROJECTILE_RADIUS } from "../entities/projectiles/BasicProjectile";
 import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjectile";
-import { STOP_WAVE_RADIUS } from "../entities/projectiles/StopWaveProjectile";
 import { CHASER_PROJECTILE_RADIUS } from "../entities/projectiles/ChaserProjectile";
 import { DualSenseMap } from "../input/DualSenseMap";
 import { getVirtualStickAnchor, VIRTUAL_STICK_RADIUS } from "../input/PlayerInput";
@@ -94,7 +93,6 @@ export class MainScene extends Phaser.Scene {
     this.generateCircleTexture("player", Player.RADIUS, 0x59f2c8);
     this.generateCircleTexture("basic-projectile", BASIC_PROJECTILE_RADIUS, 0xff6b4a);
     this.generateCircleTexture("zoomer-projectile", ZOOMER_PROJECTILE_RADIUS, 0xf2e85c);
-    this.generateCircleTexture("stopwave-projectile", STOP_WAVE_RADIUS, 0x5c8df2);
     this.generateCircleTexture("chaser-projectile", CHASER_PROJECTILE_RADIUS, 0xd35cf2);
 
     this.arenaOutlineGraphic = this.add.graphics();
@@ -183,17 +181,24 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // Stop Waves only punish dashing into them - contact while not dashing (even
-    // outside dash i-frames) has no effect, so this is gated behind isDashActive
-    // rather than checked unconditionally.
-    if (this.player.isDashActive) {
+    // Stop Wave damages on contact regardless of dash state (it bypasses dash
+    // i-frames entirely) - but it's a persistent hazard, not destroyed by
+    // contact, so an ongoing overlap while the bar sweeps past would
+    // re-damage every single frame without this gate. The general post-hit
+    // grace window (not dash i-frames specifically) is what prevents that,
+    // same as it does for every other threat type.
+    if (!this.player.isHitGraceActive) {
       const stopWaveHits = this.projectileManager.checkStopWaveCollisions(
         this.player.sprite.x,
         this.player.sprite.y,
         Player.RADIUS,
       );
       if (stopWaveHits > 0) {
-        this.player.interruptDashAndDamage(stopWaveHits);
+        if (this.player.isDashActive) {
+          this.player.interruptDashAndDamage(stopWaveHits);
+        } else {
+          this.player.takeDamage(stopWaveHits);
+        }
       }
     }
 
