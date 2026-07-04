@@ -12,6 +12,9 @@ const CHASER_INTRODUCED_AT_WAVE = 4;
 const STOP_WAVE_INTRODUCED_AT_WAVE = 6;
 const INTRODUCTION_WAVES = [ZOOMER_INTRODUCED_AT_WAVE, CHASER_INTRODUCED_AT_WAVE, STOP_WAVE_INTRODUCED_AT_WAVE];
 
+/** Stop Wave stays capped at one on screen at a time until pace has plateaued, then a second can appear. */
+const STOP_WAVE_INCREASED_CONCURRENCY_WAVE = 12;
+
 export type WavePhase = "active" | "intermission";
 
 /**
@@ -88,6 +91,7 @@ export class WaveManager {
     this.projectileManager.setZoomerSpawningEnabled(this.wave >= ZOOMER_INTRODUCED_AT_WAVE);
     this.projectileManager.setChaserSpawningEnabled(this.wave >= CHASER_INTRODUCED_AT_WAVE);
     this.projectileManager.setStopWaveSpawningEnabled(this.wave >= STOP_WAVE_INTRODUCED_AT_WAVE);
+    this.projectileManager.setStopWaveMaxConcurrent(this.wave >= STOP_WAVE_INCREASED_CONCURRENCY_WAVE ? 2 : 1);
 
     // Re-randomize the Safe Lane's sweep speed/direction every wave, so its motion
     // isn't identical wave-to-wave or run-to-run.

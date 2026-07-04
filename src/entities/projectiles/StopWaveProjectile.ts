@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { Arena } from "../../arena/Arena";
 
-const STOP_WAVE_SPEED = 70;
 const STOP_WAVE_COLOR = 0x5c8df2;
 
 // Thin enough to read as a line sweeping through, not a wall - but not
@@ -43,6 +42,7 @@ export class StopWaveProjectile {
   y = 0;
 
   private travelAngle = 0;
+  private speed = 0;
   private halfLength = 0;
   private telegraphRemainingMs = 0;
   private distanceTraveled = 0;
@@ -57,12 +57,14 @@ export class StopWaveProjectile {
   /**
    * Spawns at (x, y) on the perimeter, traveling along travelAngle (straight
    * across the arena, not homing on the player - the whole point is that it
-   * sweeps the field uniformly).
+   * sweeps the field uniformly). Speed varies per spawn so the sweep isn't
+   * identically timed every time.
    */
-  activate(x: number, y: number, travelAngle: number, arena: Arena): void {
+  activate(x: number, y: number, travelAngle: number, arena: Arena, speed: number): void {
     this.x = x;
     this.y = y;
     this.travelAngle = travelAngle;
+    this.speed = speed;
     this.halfLength = arena.bounds.radius + HALF_LENGTH_MARGIN;
 
     this.telegraphRemainingMs = SPAWN_TELEGRAPH_MS;
@@ -88,7 +90,7 @@ export class StopWaveProjectile {
     }
 
     const dt = delta / 1000;
-    const dist = STOP_WAVE_SPEED * dt;
+    const dist = this.speed * dt;
     this.x += Math.cos(this.travelAngle) * dist;
     this.y += Math.sin(this.travelAngle) * dist;
     this.distanceTraveled += dist;

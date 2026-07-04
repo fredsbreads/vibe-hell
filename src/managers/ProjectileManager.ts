@@ -23,6 +23,12 @@ const ZOOMER_BASE_SPAWN_INTERVAL_MS = 1000;
 // impossible to route around all of simultaneously.
 const STOP_WAVE_POOL_SIZE = 6;
 const STOP_WAVE_BASE_SPAWN_INTERVAL_MS = 6000;
+// How many Stop Waves are allowed on screen at once - defaults to a single
+// one at a time; WaveManager raises this on later waves via
+// setStopWaveMaxConcurrent.
+const STOP_WAVE_DEFAULT_MAX_CONCURRENT = 1;
+const STOP_WAVE_MIN_SPEED = 50;
+const STOP_WAVE_MAX_SPEED = 100;
 
 const CHASER_POOL_SIZE = 60;
 const CHASER_BASE_SPAWN_INTERVAL_MS = 1800;
@@ -163,6 +169,10 @@ function findInactiveStopWave(pool: StopWaveProjectile[]): StopWaveProjectile | 
   return pool.find((p) => !p.active);
 }
 
+function countActiveStopWaves(pool: StopWaveProjectile[]): number {
+  return pool.reduce((count, p) => count + (p.active ? 1 : 0), 0);
+}
+
 /** Spawns on the perimeter like everything else, but travels straight across the arena rather than homing on the player. */
 function spawnStopWave(
   wave: StopWaveProjectile,
@@ -175,7 +185,8 @@ function spawnStopWave(
   const angle = pickSafeSpawnAngle(playerAngle, safeLaneCenterAngle);
   const spawnPoint = arena.boundaryPointAtAngle(angle);
   const travelAngle = angle + Math.PI;
-  wave.activate(spawnPoint.x, spawnPoint.y, travelAngle, arena);
+  const speed = STOP_WAVE_MIN_SPEED + Math.random() * (STOP_WAVE_MAX_SPEED - STOP_WAVE_MIN_SPEED);
+  wave.activate(spawnPoint.x, spawnPoint.y, travelAngle, arena, speed);
 }
 
 function stepStopWavePool(pool: StopWaveProjectile[], delta: number): number {
@@ -238,6 +249,7 @@ export class ProjectileManager {
   private readonly stopWavePool: StopWaveProjectile[] = [];
   private stopWaveSpawnTimerMs = STOP_WAVE_BASE_SPAWN_INTERVAL_MS;
   private stopWaveSpawningEnabled = false;
+  private stopWaveMaxConcurrent = STOP_WAVE_DEFAULT_MAX_CONCURRENT;
 
   private readonly chaserPool: ChaserProjectile[] = [];
   private chaserSpawnTimerMs = CHASER_BASE_SPAWN_INTERVAL_MS;
@@ -321,6 +333,11 @@ export class ProjectileManager {
     this.difficultyMultiplier = multiplier;
   }
 
+  /** Caps how many Stop Waves can be active at once; called by WaveManager as waves progress. */
+  setStopWaveMaxConcurrent(max: number): void {
+    this.stopWaveMaxConcurrent = max;
+  }
+
   /**
    * Picks a new random sweep speed and direction for the Safe Lane, so its
    * motion isn't identical wave-to-wave or run-to-run. Called by WaveManager
@@ -373,9 +390,11 @@ export class ProjectileManager {
     if (this.stopWaveSpawningEnabled) {
       this.stopWaveSpawnTimerMs -= delta;
       if (this.stopWaveSpawnTimerMs <= 0) {
-        const wave = findInactiveStopWave(this.stopWavePool);
-        if (wave) {
-          spawnStopWave(wave, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
+        if (countActiveStopWaves(this.stopWavePool) < this.stopWaveMaxConcurrent) {
+          const wave = findInactiveStopWave(this.stopWavePool);
+          if (wave) {
+            spawnStopWave(wave, this.arena, playerX, playerY, this.safeLaneCenterAngleValue);
+          }
         }
         this.stopWaveSpawnTimerMs = STOP_WAVE_BASE_SPAWN_INTERVAL_MS / this.difficultyMultiplier;
       }
