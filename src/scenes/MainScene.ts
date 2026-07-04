@@ -491,9 +491,22 @@ export class MainScene extends Phaser.Scene {
     const stopWaveState = this.projectileManager.isStopWaveSpawningEnabled ? "ON" : "off";
     const chaserState = this.projectileManager.isChaserSpawningEnabled ? "ON" : "off";
     const shapeLabel = ARENA_SHAPE_CYCLE[this.arenaShapeIndex].label;
-    this.debugText.setText(
-      `[DEBUG] 1: Zoomer ${zoomerState}   2: Stop Wave ${stopWaveState}   3: Chaser ${chaserState}   4: Arena (${shapeLabel})`,
-    );
+    let text = `[DEBUG] 1: Zoomer ${zoomerState}   2: Stop Wave ${stopWaveState}   3: Chaser ${chaserState}   4: Arena (${shapeLabel})`;
+
+    // Temporary raw-gamepad readout for diagnosing controllers whose reported
+    // mapping/axis layout doesn't match the W3C "standard" assumption
+    // DualSenseMap and PlayerInput are built on (e.g. Switch Pro Controller).
+    // Shows the browser's unfiltered native axes array, not Phaser's own
+    // leftStick/rightStick interpretation of it.
+    const rawPad = this.input.gamepad?.pad1?.pad;
+    if (rawPad) {
+      const axes = Array.from(rawPad.axes as number[])
+        .map((value, i) => `${i}:${value.toFixed(2)}`)
+        .join(" ");
+      text += `\n[PAD] mapping="${rawPad.mapping}" buttons=${rawPad.buttons.length} axes=[${axes}]`;
+    }
+
+    this.debugText.setText(text);
   }
 
   private generateCircleTexture(key: string, radius: number, color: number): void {
