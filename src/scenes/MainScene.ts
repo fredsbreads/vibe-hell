@@ -10,7 +10,7 @@ import { PolygonArena } from "../arena/PolygonArena";
 import { BASIC_PROJECTILE_RADIUS } from "../entities/projectiles/BasicProjectile";
 import { ZOOMER_PROJECTILE_RADIUS } from "../entities/projectiles/ZoomerProjectile";
 import { CHASER_PROJECTILE_RADIUS } from "../entities/projectiles/ChaserProjectile";
-import { DualSenseMap } from "../input/DualSenseMap";
+import { DualSenseMap, isPadButtonDown } from "../input/DualSenseMap";
 import { getVirtualStickAnchor, VIRTUAL_STICK_RADIUS } from "../input/PlayerInput";
 import { getAimMode } from "../config/settings";
 import { MenuOverlay } from "../ui/MenuOverlay";
@@ -235,7 +235,7 @@ export class MainScene extends Phaser.Scene {
   private pollMenuInputs(delta: number): void {
     const pad = this.input.gamepad?.pad1;
 
-    const escHeld = this.escKey.isDown || !!pad?.isButtonDown(DualSenseMap.OPTIONS);
+    const escHeld = this.escKey.isDown || isPadButtonDown(pad, DualSenseMap.OPTIONS);
     const escPressed = escHeld && !this.prevEscHeld;
     this.prevEscHeld = escHeld;
     if (escPressed) {
@@ -254,7 +254,7 @@ export class MainScene extends Phaser.Scene {
     // game-over) so you can bail out and restart without pausing first.
     // restartHoldText shows the hold building up so it reads as a deliberate confirm
     // gesture instead of the key just not working.
-    const restartHeld = this.restartKey.isDown || !!pad?.isButtonDown(DualSenseMap.SQUARE);
+    const restartHeld = this.restartKey.isDown || isPadButtonDown(pad, DualSenseMap.SQUARE);
     if (restartHeld) {
       this.restartHoldMs += delta;
       if (this.restartHoldMs >= RESTART_HOLD_DURATION_MS) {
@@ -274,7 +274,7 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    const confirmHeld = this.confirmKey.isDown || !!pad?.isButtonDown(DualSenseMap.CROSS);
+    const confirmHeld = this.confirmKey.isDown || isPadButtonDown(pad, DualSenseMap.CROSS);
     const confirmPressed = confirmHeld && !this.prevConfirmHeld;
     this.prevConfirmHeld = confirmHeld;
     if (confirmPressed) {
@@ -285,7 +285,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    const mainMenuHeld = this.mainMenuKey.isDown || !!pad?.isButtonDown(DualSenseMap.TRIANGLE);
+    const mainMenuHeld = this.mainMenuKey.isDown || isPadButtonDown(pad, DualSenseMap.TRIANGLE);
     const mainMenuPressed = mainMenuHeld && !this.prevMainMenuHeld;
     this.prevMainMenuHeld = mainMenuHeld;
     if (mainMenuPressed) {

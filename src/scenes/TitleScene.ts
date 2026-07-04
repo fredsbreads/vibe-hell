@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { DualSenseMap } from "../input/DualSenseMap";
+import { DualSenseMap, isPadButtonDown } from "../input/DualSenseMap";
 import { getAimMode, toggleAimMode } from "../config/settings";
 
 const MIN_START_WAVE = 1;
@@ -101,25 +101,25 @@ export class TitleScene extends Phaser.Scene {
       return;
     }
 
-    const crossHeld = pad.isButtonDown(DualSenseMap.CROSS);
+    const crossHeld = isPadButtonDown(pad, DualSenseMap.CROSS);
     if (crossHeld && !this.prevCrossHeld) {
       this.startGame();
     }
     this.prevCrossHeld = crossHeld;
 
-    const dpadLeftHeld = pad.isButtonDown(DualSenseMap.DPAD_LEFT);
+    const dpadLeftHeld = isPadButtonDown(pad, DualSenseMap.DPAD_LEFT);
     if (dpadLeftHeld && !this.prevDpadLeftHeld) {
       this.adjustStartWave(-1);
     }
     this.prevDpadLeftHeld = dpadLeftHeld;
 
-    const dpadRightHeld = pad.isButtonDown(DualSenseMap.DPAD_RIGHT);
+    const dpadRightHeld = isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT);
     if (dpadRightHeld && !this.prevDpadRightHeld) {
       this.adjustStartWave(1);
     }
     this.prevDpadRightHeld = dpadRightHeld;
 
-    const triangleHeld = pad.isButtonDown(DualSenseMap.TRIANGLE);
+    const triangleHeld = isPadButtonDown(pad, DualSenseMap.TRIANGLE);
     if (triangleHeld && !this.prevTriangleHeld) {
       toggleAimMode();
       this.refreshAimModeText();

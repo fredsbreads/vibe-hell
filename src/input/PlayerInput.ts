@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { DualSenseMap } from "./DualSenseMap";
+import { DualSenseMap, getPadButtonValue, isPadButtonDown } from "./DualSenseMap";
 import { getAimMode } from "../config/settings";
 
 const STICK_DEADZONE = 0.2;
@@ -103,12 +103,12 @@ export class PlayerInput {
         }
       }
 
-      const l2Value = pad.getButtonValue(DualSenseMap.L2);
-      const crossHeld = pad.isButtonDown(DualSenseMap.CROSS);
+      const l2Value = getPadButtonValue(pad, DualSenseMap.L2);
+      const crossHeld = isPadButtonDown(pad, DualSenseMap.CROSS);
       dashHeld = l2Value > TRIGGER_THRESHOLD || crossHeld;
 
-      const r2Value = pad.getButtonValue(DualSenseMap.R2);
-      const r1Held = pad.isButtonDown(DualSenseMap.R1);
+      const r2Value = getPadButtonValue(pad, DualSenseMap.R2);
+      const r1Held = isPadButtonDown(pad, DualSenseMap.R1);
       slashHeld = r2Value > TRIGGER_THRESHOLD || r1Held;
     }
 
