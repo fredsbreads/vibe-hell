@@ -21,6 +21,8 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   protected vx = 0;
   protected vy = 0;
   protected telegraphRemainingMs = 0;
+  /** World angle (from the arena center) this projectile spawned at - used to keep it riding the perimeter while telegraphing, even as the arena rotates underneath it. */
+  private perimeterAngle = 0;
 
   private readonly maxLifetimeMs: number;
   private lifetimeRemainingMs: number;
@@ -42,8 +44,9 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     this.setVisible(false);
   }
 
-  activate(x: number, y: number, targetX: number, targetY: number): void {
+  activate(x: number, y: number, targetX: number, targetY: number, arena: Arena): void {
     this.setPosition(x, y);
+    this.perimeterAngle = Math.atan2(y - arena.bounds.centerY, x - arena.bounds.centerX);
     const angle = Math.atan2(targetY - y, targetX - x);
     this.vx = Math.cos(angle) * this.speed;
     this.vy = Math.sin(angle) * this.speed;
@@ -63,13 +66,19 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
    * Advances the telegraph timer and fades the sprite in while it's still
    * telegraphing; otherwise moves it along its velocity. Returns false while
    * still telegraphing (hasn't started moving yet), so subclasses know to
-   * skip bounce/escape checks for this step.
+   * skip bounce/escape checks for this step. While telegraphing, keeps
+   * re-anchoring to the arena's current boundary at its original spawn
+   * bearing, so a rotating arena carries it along the perimeter instead of
+   * leaving it sitting at a fixed point while the wall rotates out from
+   * under it (and it launches from a spot that no longer matches the wall).
    */
-  protected move(delta: number): boolean {
+  protected move(delta: number, arena: Arena): boolean {
     if (this.telegraphRemainingMs > 0) {
       this.telegraphRemainingMs = Math.max(0, this.telegraphRemainingMs - delta);
       const progress = 1 - this.telegraphRemainingMs / SPAWN_TELEGRAPH_MS;
       this.setAlpha(TELEGRAPH_START_ALPHA + (1 - TELEGRAPH_START_ALPHA) * progress);
+      const point = arena.boundaryPointAtAngle(this.perimeterAngle);
+      this.setPosition(point.x, point.y);
       return false;
     }
 

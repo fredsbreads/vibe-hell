@@ -99,7 +99,7 @@ function spawnOnPerimeter(
   const playerAngle = Math.atan2(playerY - arena.bounds.centerY, playerX - arena.bounds.centerX);
   const angle = pickSafeSpawnAngle(playerAngle, safeLaneCenterAngle);
   const spawnPoint = arena.boundaryPointAtAngle(angle);
-  projectile.activate(spawnPoint.x, spawnPoint.y, playerX, playerY);
+  projectile.activate(spawnPoint.x, spawnPoint.y, playerX, playerY, arena);
 }
 
 function stepPool(pool: LinearProjectile[], delta: number, arena: Arena, playerX: number, playerY: number): void {
