@@ -10,6 +10,8 @@ export const ZOOMER_PROJECTILE_RADIUS = 6;
  * bounce, so it exits the arena (and gets scored as an escaped threat)
  * rather than lingering. Countered by dashing through it (i-frames), or by
  * a well-timed slash; regular contact deals damage like any other threat.
+ * Deflected Zoomers behave like any other deflected projectile though -
+ * bouncing off the wall (capped) rather than flying straight through it.
  */
 export class ZoomerProjectile extends LinearProjectile {
   constructor(scene: Phaser.Scene) {
@@ -19,6 +21,12 @@ export class ZoomerProjectile extends LinearProjectile {
   step(delta: number, arena: Arena, _playerX: number, _playerY: number): boolean {
     if (!this.move(delta, arena)) {
       return false;
+    }
+    if (this.deflected) {
+      this.bounceOffWall(arena);
+      if (this.hasUsedAllDeflectedBounces()) {
+        return true;
+      }
     }
     return this.hasEscaped(arena);
   }

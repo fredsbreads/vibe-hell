@@ -16,10 +16,10 @@ The game decouples player movement from player aiming to create a highly tactica
 
 | Projectile Name | Behavior Profile | Counter Strategy |
 | --- | --- | --- |
-| 1. Basic | Medium speed; aims at the player once at launch, then flies a fixed straight line; bounces off the stadium walls. | Evade via movement, or use a timed directional Slash to instantly deactivate it. |
-| 2. Zoomer | Highly fast; fires in straight, linear trajectories. | Execute a timed Dash to utilize invincibility frames (i-frames) and phase through it. |
-| 3. Stop Wave | A thin, solid bar spanning the full width of the arena, sweeping from one side clean across to the opposite side. No gap - walking through it is completely harmless. Not destroyed by contact; it's a persistent hazard, not an obstacle. | IMMUNE TO SLASH. A pure Dash counter: normal movement passes through it freely, but dashing into it cancels the dash and inflicts damage, bypassing the i-frames Dash would normally grant. |
-| 4. Chaser | Fast, like a Zoomer, but bounces off the stadium walls; unlike Basic's predictable mirror bounce, it re-aims dead at the player's current position at the instant of each bounce, so it keeps re-committing to the chase instead of settling into a fixed rebound path. Slower than a pure Zoomer to offset the extra threat of persistent re-aiming. | Execute a timed Dash to phase through it (i-frames), or use a timed directional Slash to instantly deactivate it. Not a hard counter type - normal contact deals 1 HP like Basic/Zoomer. |
+| 1. Basic | Medium speed; aims at the player once at launch, then flies a fixed straight line; bounces off the stadium walls. | Evade via movement, or use a timed directional Slash to deflect it. |
+| 2. Zoomer | Highly fast; fires in straight, linear trajectories. | Execute a timed Dash to utilize invincibility frames (i-frames) and phase through it, or use a timed directional Slash to deflect it. |
+| 3. Stop Wave | A thin, solid bar spanning the full width of the arena, sweeping from one side clean across to the opposite side. No gap - walking through it is completely harmless. Not destroyed by contact; it's a persistent hazard, not an obstacle. | IMMUNE TO SLASH. A pure Dash counter: normal movement passes through it freely, but dashing into it cancels the dash and inflicts damage, bypassing the i-frames Dash would normally grant. Deflected projectiles also pass through it with no interaction. |
+| 4. Chaser | Fast, like a Zoomer, but bounces off the stadium walls; unlike Basic's predictable mirror bounce, it re-aims dead at the player's current position at the instant of each bounce, so it keeps re-committing to the chase instead of settling into a fixed rebound path. Slower than a pure Zoomer to offset the extra threat of persistent re-aiming. | Execute a timed Dash to phase through it (i-frames), or use a timed directional Slash to deflect it. Not a hard counter type - normal contact deals 1 HP like Basic/Zoomer. |
 
 ## 3. Player Character Specification & Input Layout
 
@@ -45,6 +45,7 @@ The game decouples player movement from player aiming to create a highly tactica
 - **Trigger:** R2 Trigger or Right Bumper (R1).
 - **Properties:** A short-range melee attack executed along the precise aiming angle of the Right Analog Stick. Can be performed seamlessly while moving at full speed.
 - **Cooldown:** A firm cooldown to prevent mindless attack spam.
+- **Deflection:** Connecting with a Basic, Zoomer, or Chaser doesn't destroy it outright - it redirects the projectile along the player's locked-in aim angle at its original speed, turning it friendly (rendered in a uniform teal, regardless of its original type). A deflected projectile mirror-bounces off the arena wall up to 3 times before despawning, and destroys any hostile projectile it touches for the rest of its lifetime - each such kill scores identically to a direct Slash hit. It never damages the player, and is completely inert against Stop Wave (passes through with no interaction, same as it being immune to Slash in the first place).
 
 ## 4. Threat & Spawner Architecture
 
@@ -54,7 +55,7 @@ The game decouples player movement from player aiming to create a highly tactica
 
 **Evolution of the Arena:**
 
-The arena supports multiple boundary shapes (Circle, Square, Pentagon, Hexagon, Octagon) with rotation, so bouncing projectiles' deflection math isn't fixed to one static geometry. A new shape is randomly chosen at the start of every wave (never repeating the immediately preceding one), so a run's arena keeps changing without ever needing a wave transition to also decide *which* shape comes next in a fixed order. Also reachable manually via a debug toggle, for testing a specific shape on demand.
+The arena supports multiple boundary shapes (Circle, Square, Pentagon, Hexagon, Octagon) with rotation, so bouncing projectiles' deflection math isn't fixed to one static geometry. A new shape is randomly chosen during every intermission's countdown (never repeating the immediately preceding one), so a run's arena keeps changing without ever needing a wave transition to also decide *which* shape comes next in a fixed order. Also reachable manually via a debug toggle, for testing a specific shape on demand.
 
 ### Fair-Play Spawner Rules
 
@@ -87,7 +88,7 @@ Difficulty scales along two independent axes so a single wave transition never c
 ### Scoring Configuration
 
 - **Metric Title:** THREATS ENDURED
-- **Logic:** Score increments by 1 whenever a slashable projectile is successfully deactivated by a player Slash. A projectile that naturally flies outside the playable field boundaries unhandled is not scored.
+- **Logic:** Score increments by 1 whenever a Slash connects with a projectile (deflecting it), and by another 1 for every hostile projectile that deflected projectile subsequently destroys on contact. A projectile that naturally flies outside the playable field boundaries unhandled is not scored.
 
 ## 6. Technical Implementation Directives
 

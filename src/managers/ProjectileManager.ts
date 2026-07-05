@@ -10,6 +10,7 @@ import { spawnPop } from "../effects/spawnPop";
 
 const SLASH_KILL_POP_COLOR = 0xffe98a;
 const HIT_POP_COLOR = 0xff3b3b;
+const DEFLECT_POP_COLOR = 0x59f2c8;
 
 const BASIC_POOL_SIZE = 100;
 const BASIC_BASE_SPAWN_INTERVAL_MS = 1500;
@@ -113,21 +114,23 @@ function stepPool(pool: LinearProjectile[], delta: number, arena: Arena, playerX
   }
 }
 
+/** Deflects (rather than deactivates) any hostile projectile the slash connects with - already-deflected ones are skipped, so a friendly projectile can't be re-processed by its own owner's next swing. */
 function checkSlashHitsOnPool(pool: LinearProjectile[], hitbox: SlashHitbox, onHit: (x: number, y: number) => void): number {
   let hits = 0;
   for (const projectile of pool) {
-    if (!projectile.active) {
+    if (!projectile.active || projectile.deflected) {
       continue;
     }
     if (isWithinSlashArc(projectile, hitbox)) {
       onHit(projectile.x, projectile.y);
-      projectile.deactivate();
+      projectile.deflect(hitbox.angle);
       hits++;
     }
   }
   return hits;
 }
 
+/** Deflected projectiles are friendly - they never damage the player, and contact with them doesn't consume them (only running out of bounces, or hitting a hostile, does). */
 function checkContactOnPool(
   pool: LinearProjectile[],
   playerX: number,
@@ -137,7 +140,7 @@ function checkContactOnPool(
 ): number {
   let damage = 0;
   for (const projectile of pool) {
-    if (!projectile.active) {
+    if (!projectile.active || projectile.deflected) {
       continue;
     }
     const dx = projectile.x - playerX;
@@ -150,6 +153,46 @@ function checkContactOnPool(
     }
   }
   return damage;
+}
+
+/**
+ * Deflected projectiles destroy any hostile (non-deflected) projectile they
+ * touch, for as long as they're alive - not just at the moment of impact
+ * with the slash. Checked across all three pools together (a deflected
+ * Basic can kill a hostile Chaser, etc). Stop Wave never participates in
+ * this check at all (it has no pool-vs-pool collision to begin with), so
+ * deflected projectiles pass through it exactly like a hostile one would.
+ */
+function checkDeflectedKills(pools: LinearProjectile[][], onHit: (x: number, y: number) => void): number {
+  const active: LinearProjectile[] = [];
+  for (const pool of pools) {
+    for (const projectile of pool) {
+      if (projectile.active) {
+        active.push(projectile);
+      }
+    }
+  }
+
+  let kills = 0;
+  for (const deflected of active) {
+    if (!deflected.deflected) {
+      continue;
+    }
+    for (const hostile of active) {
+      if (hostile === deflected || !hostile.active || hostile.deflected) {
+        continue;
+      }
+      const dx = hostile.x - deflected.x;
+      const dy = hostile.y - deflected.y;
+      const minDist = hostile.radius + deflected.radius;
+      if (dx * dx + dy * dy <= minDist * minDist) {
+        onHit(hostile.x, hostile.y);
+        hostile.deactivate();
+        kills++;
+      }
+    }
+  }
+  return kills;
 }
 
 // Stop Wave doesn't fit the LinearProjectile model (circular hitbox, escape
@@ -345,8 +388,8 @@ export class ProjectileManager {
     }
   }
 
-  /** Advances all spawners and active projectiles. */
-  update(delta: number, playerX: number, playerY: number): void {
+  /** Advances all spawners and active projectiles. Returns how many hostile projectiles were destroyed by a deflected projectile this frame (should be scored, same as a direct Slash hit). */
+  update(delta: number, playerX: number, playerY: number): number {
     this.arena.update(delta);
 
     this.safeLaneCenterAngleValue = Phaser.Math.Angle.Wrap(
@@ -403,14 +446,17 @@ export class ProjectileManager {
     stepPool(this.zoomerPool, delta, this.arena, playerX, playerY);
     stepStopWavePool(this.stopWavePool, delta, this.arena);
     stepPool(this.chaserPool, delta, this.arena, playerX, playerY);
+
+    const onDeflectedKill = (x: number, y: number) => spawnPop(this.scene, x, y, SLASH_KILL_POP_COLOR);
+    return checkDeflectedKills([this.basicPool, this.zoomerPool, this.chaserPool], onDeflectedKill);
   }
 
-  /** Deactivates any Basic/Zoomer/Chaser projectile inside the slash hitbox. Stop Waves are immune to Slash. Returns how many were hit. */
+  /** Deflects any Basic/Zoomer/Chaser projectile inside the slash hitbox - fired back out in the player's aim direction, friendly from here on. Stop Waves are immune to Slash. Returns how many were hit. */
   checkSlashHits(hitbox: SlashHitbox | null): number {
     if (!hitbox) {
       return 0;
     }
-    const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, SLASH_KILL_POP_COLOR);
+    const onHit = (x: number, y: number) => spawnPop(this.scene, x, y, DEFLECT_POP_COLOR);
     return (
       checkSlashHitsOnPool(this.basicPool, hitbox, onHit) +
       checkSlashHitsOnPool(this.zoomerPool, hitbox, onHit) +

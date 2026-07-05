@@ -18,7 +18,9 @@ const MAX_LIFETIME_MS = 10000;
  * unlike Basic/Zoomer it will rarely "naturally" fly off and score itself;
  * Slash, a well-timed Dash, or its own 10s lifetime cap are the reliable ways
  * it goes away. Slower than a pure Zoomer to offset how much more threatening
- * persistent re-aiming is.
+ * persistent re-aiming is. A deflected Chaser loses the re-aim entirely -
+ * it bounces like any other deflected projectile (capped), rather than
+ * continuing to hunt anything down.
  */
 export class ChaserProjectile extends LinearProjectile {
   constructor(scene: Phaser.Scene) {
@@ -28,6 +30,14 @@ export class ChaserProjectile extends LinearProjectile {
   step(delta: number, arena: Arena, playerX: number, playerY: number): boolean {
     if (!this.move(delta, arena)) {
       return false;
+    }
+
+    if (this.deflected) {
+      this.bounceOffWall(arena);
+      if (this.hasUsedAllDeflectedBounces()) {
+        return true;
+      }
+      return this.hasEscaped(arena) || this.hasExpired();
     }
 
     const dx = this.x - arena.bounds.centerX;

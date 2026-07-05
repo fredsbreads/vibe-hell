@@ -22,30 +22,15 @@ export class BasicProjectile extends LinearProjectile {
     super(scene, "basic-projectile", BASIC_PROJECTILE_SPEED, BASIC_PROJECTILE_RADIUS, MAX_LIFETIME_MS);
   }
 
-  /** Moves and bounces off the arena wall. Returns true if it has drifted well past the wall, or lived past its 10s cap, and should be despawned. */
+  /** Moves and bounces off the arena wall. Returns true if it has drifted well past the wall, used up all its bounces after being deflected, or lived past its 10s cap, and should be despawned. */
   step(delta: number, arena: Arena, _playerX: number, _playerY: number): boolean {
     if (!this.move(delta, arena)) {
       return false;
     }
 
-    const dx = this.x - arena.bounds.centerX;
-    const dy = this.y - arena.bounds.centerY;
-    const distFromCenter = Math.sqrt(dx * dx + dy * dy);
-
-    if (distFromCenter > 0) {
-      const angle = Math.atan2(dy, dx);
-      const maxDist = arena.maxRadiusAtAngle(angle) - this.radius;
-
-      if (distFromCenter > maxDist) {
-        const scale = maxDist / distFromCenter;
-        this.x = arena.bounds.centerX + dx * scale;
-        this.y = arena.bounds.centerY + dy * scale;
-
-        const n = arena.normalAtAngle(angle);
-        const dot = this.vx * n.x + this.vy * n.y;
-        this.vx -= 2 * dot * n.x;
-        this.vy -= 2 * dot * n.y;
-      }
+    this.bounceOffWall(arena);
+    if (this.hasUsedAllDeflectedBounces()) {
+      return true;
     }
 
     return this.hasEscaped(arena) || this.hasExpired();
