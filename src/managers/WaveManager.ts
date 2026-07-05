@@ -26,6 +26,9 @@ export type WavePhase = "active" | "intermission";
  * ones where a new threat type is introduced (those waves hold pace steady),
  * plateauing after 10 pace steps; and the threat roster itself, which grows
  * on its own schedule (Zoomer at wave 2, Chaser at wave 4, Stop Wave at wave 6).
+ * Also fires onWaveStart at the start of every wave (including the first),
+ * for whatever the caller wants re-randomized each round - currently just the
+ * arena shape (see MainScene).
  */
 export class WaveManager {
   private wave = 1;
@@ -35,6 +38,7 @@ export class WaveManager {
   constructor(
     private readonly projectileManager: ProjectileManager,
     startWave = 1,
+    private readonly onWaveStart?: () => void,
   ) {
     this.wave = startWave;
     this.applyWaveConfig();
@@ -96,6 +100,10 @@ export class WaveManager {
     // Re-randomize the Safe Lane's sweep speed/direction every wave, so its motion
     // isn't identical wave-to-wave or run-to-run.
     this.projectileManager.rerollSafeLaneMotion();
+
+    // Also fires on construction (i.e. the very first wave), not just later
+    // transitions, so the arena shape is randomized from the start of a run too.
+    this.onWaveStart?.();
   }
 
   /**

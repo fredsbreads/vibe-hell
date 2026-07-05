@@ -54,7 +54,7 @@ The game decouples player movement from player aiming to create a highly tactica
 
 **Evolution of the Arena:**
 
-The arena architecture supports multiple boundary shapes (Circle, Square, Hexagon, Octagon) and rotation, so bouncing projectiles' deflection math isn't fixed to one static geometry. Tying shape/rotation changes to wave progression - so the arena evolves automatically as a run goes on, rather than only being switchable via a manual debug toggle - is planned but not yet wired up.
+The arena supports multiple boundary shapes (Circle, Square, Pentagon, Hexagon, Octagon) with rotation, so bouncing projectiles' deflection math isn't fixed to one static geometry. A new shape is randomly chosen at the start of every wave (never repeating the immediately preceding one), so a run's arena keeps changing without ever needing a wave transition to also decide *which* shape comes next in a fixed order. Also reachable manually via a debug toggle, for testing a specific shape on demand.
 
 ### Fair-Play Spawner Rules
 

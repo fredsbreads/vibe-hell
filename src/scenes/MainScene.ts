@@ -26,10 +26,17 @@ const RESTART_HOLD_DURATION_MS = 500;
 /** How far the left stick must tilt vertically to count as an Up/Down menu-navigation press. */
 const MENU_STICK_THRESHOLD = 0.5;
 
-/** Debug-cyclable arena shapes (key 4), demonstrating the shape abstraction beyond the default circle. */
+/**
+ * Arena shapes available each round - also reachable manually via debug key 4.
+ * A regular n-gon's flat sides sit closer to the center than its corners do
+ * (apothem = circumradius * cos(pi/n)), so lower-n shapes like Square pinch in
+ * noticeably more at the edges than higher-n ones for the same radius; Pentagon
+ * sits between Square and Hexagon on that scale.
+ */
 const ARENA_SHAPE_CYCLE: Array<{ label: string; build: (bounds: ArenaBounds) => ArenaShape }> = [
   { label: "Circle", build: (bounds) => new CircleArena(bounds) },
   { label: "Square", build: (bounds) => new PolygonArena(bounds, 4, ARENA_ROTATION_RAD_PER_MS) },
+  { label: "Pentagon", build: (bounds) => new PolygonArena(bounds, 5, ARENA_ROTATION_RAD_PER_MS) },
   { label: "Hexagon", build: (bounds) => new PolygonArena(bounds, 6, ARENA_ROTATION_RAD_PER_MS) },
   { label: "Octagon", build: (bounds) => new PolygonArena(bounds, 8, ARENA_ROTATION_RAD_PER_MS) },
 ];
@@ -111,7 +118,7 @@ export class MainScene extends Phaser.Scene {
     // the new run begins.
     this.player.resyncInputState();
     this.projectileManager = new ProjectileManager(this, this.arena);
-    this.waveManager = new WaveManager(this.projectileManager, this.startWave);
+    this.waveManager = new WaveManager(this.projectileManager, this.startWave, () => this.rerollArenaShape());
 
     this.threatsText = this.add
       .text(width - 12, 12, "", {
@@ -484,6 +491,25 @@ export class MainScene extends Phaser.Scene {
       this.arenaShapeIndex = (this.arenaShapeIndex + 1) % ARENA_SHAPE_CYCLE.length;
       this.arena.setShape(ARENA_SHAPE_CYCLE[this.arenaShapeIndex].build(this.arena.bounds));
     });
+  }
+
+  /**
+   * Picks a new random arena shape, excluding whichever one is currently
+   * active - called at the start of every wave (including the first) via
+   * WaveManager's onWaveStart callback. Excluding a repeat guarantees the
+   * arena actually changes each round instead of occasionally rolling the
+   * same shape twice in a row and looking like nothing happened.
+   */
+  private rerollArenaShape(): void {
+    if (ARENA_SHAPE_CYCLE.length <= 1) {
+      return;
+    }
+    let nextIndex = this.arenaShapeIndex;
+    while (nextIndex === this.arenaShapeIndex) {
+      nextIndex = Math.floor(Math.random() * ARENA_SHAPE_CYCLE.length);
+    }
+    this.arenaShapeIndex = nextIndex;
+    this.arena.setShape(ARENA_SHAPE_CYCLE[this.arenaShapeIndex].build(this.arena.bounds));
   }
 
   private updateDebugText(): void {
