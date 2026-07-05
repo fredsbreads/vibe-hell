@@ -180,12 +180,12 @@ function spawnStopWave(
   wave.activate(spawnPoint.x, spawnPoint.y, travelAngle, arena, speed);
 }
 
-function stepStopWavePool(pool: StopWaveProjectile[], delta: number): void {
+function stepStopWavePool(pool: StopWaveProjectile[], delta: number, arena: Arena): void {
   for (const wave of pool) {
     if (!wave.active) {
       continue;
     }
-    if (wave.step(delta)) {
+    if (wave.step(delta, arena)) {
       wave.deactivate();
     }
   }
@@ -401,7 +401,7 @@ export class ProjectileManager {
 
     stepPool(this.basicPool, delta, this.arena, playerX, playerY);
     stepPool(this.zoomerPool, delta, this.arena, playerX, playerY);
-    stepStopWavePool(this.stopWavePool, delta);
+    stepStopWavePool(this.stopWavePool, delta, this.arena);
     stepPool(this.chaserPool, delta, this.arena, playerX, playerY);
   }
 

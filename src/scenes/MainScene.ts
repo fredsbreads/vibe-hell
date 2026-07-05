@@ -495,10 +495,13 @@ export class MainScene extends Phaser.Scene {
 
   /**
    * Picks a new random arena shape, excluding whichever one is currently
-   * active - called at the start of every wave (including the first) via
-   * WaveManager's onWaveStart callback. Excluding a repeat guarantees the
-   * arena actually changes each round instead of occasionally rolling the
-   * same shape twice in a row and looking like nothing happened.
+   * active - called at the start of every intermission (including the very
+   * first wave's, at construction) via WaveManager's onIntermissionStart
+   * callback, so the shape change happens during the breather countdown
+   * rather than the instant the next wave's bullets start flying. Excluding a
+   * repeat guarantees the arena actually changes each round instead of
+   * occasionally rolling the same shape twice in a row and looking like
+   * nothing happened.
    */
   private rerollArenaShape(): void {
     if (ARENA_SHAPE_CYCLE.length <= 1) {

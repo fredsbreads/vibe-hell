@@ -26,9 +26,12 @@ export type WavePhase = "active" | "intermission";
  * ones where a new threat type is introduced (those waves hold pace steady),
  * plateauing after 10 pace steps; and the threat roster itself, which grows
  * on its own schedule (Zoomer at wave 2, Chaser at wave 4, Stop Wave at wave 6).
- * Also fires onWaveStart at the start of every wave (including the first),
- * for whatever the caller wants re-randomized each round - currently just the
- * arena shape (see MainScene).
+ * Also fires onIntermissionStart at the start of every intermission (and once
+ * at construction, for the very first wave, which has no intermission before
+ * it) - for whatever the caller wants re-randomized each round - currently
+ * just the arena shape (see MainScene). Firing at intermission-start rather
+ * than at the following wave-start means the change happens during the
+ * breather countdown, not the instant bullets start flying again.
  */
 export class WaveManager {
   private wave = 1;
@@ -38,10 +41,11 @@ export class WaveManager {
   constructor(
     private readonly projectileManager: ProjectileManager,
     startWave = 1,
-    private readonly onWaveStart?: () => void,
+    private readonly onIntermissionStart?: () => void,
   ) {
     this.wave = startWave;
     this.applyWaveConfig();
+    this.onIntermissionStart?.();
   }
 
   get currentWave(): number {
@@ -77,6 +81,9 @@ export class WaveManager {
     this.projectileManager.setZoomerSpawningEnabled(false);
     this.projectileManager.setChaserSpawningEnabled(false);
     this.projectileManager.setStopWaveSpawningEnabled(false);
+    // Reroll whatever the caller wants changed for the upcoming wave during
+    // the breather countdown itself, rather than at the instant it ends.
+    this.onIntermissionStart?.();
   }
 
   private startNextWave(): void {
@@ -100,10 +107,6 @@ export class WaveManager {
     // Re-randomize the Safe Lane's sweep speed/direction every wave, so its motion
     // isn't identical wave-to-wave or run-to-run.
     this.projectileManager.rerollSafeLaneMotion();
-
-    // Also fires on construction (i.e. the very first wave), not just later
-    // transitions, so the arena shape is randomized from the start of a run too.
-    this.onWaveStart?.();
   }
 
   /**

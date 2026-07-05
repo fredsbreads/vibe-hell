@@ -42,6 +42,7 @@ export class StopWaveProjectile {
   y = 0;
 
   private travelAngle = 0;
+  private perimeterAngle = 0;
   private speed = 0;
   private halfLength = 0;
   private telegraphRemainingMs = 0;
@@ -64,6 +65,11 @@ export class StopWaveProjectile {
     this.x = x;
     this.y = y;
     this.travelAngle = travelAngle;
+    // travelAngle points straight across from the spawn edge, so the spawn
+    // edge itself is the opposite bearing - kept separately so the telegraph
+    // phase can keep re-querying the (possibly rotating) wall at this exact
+    // world angle instead of sitting at a fixed point in space.
+    this.perimeterAngle = travelAngle + Math.PI;
     this.speed = speed;
     this.halfLength = arena.bounds.radius + HALF_LENGTH_MARGIN;
 
@@ -82,9 +88,17 @@ export class StopWaveProjectile {
   }
 
   /** Advances the wave. Returns true once it's fully swept past the opposite side and should be despawned. */
-  step(delta: number): boolean {
+  step(delta: number, arena: Arena): boolean {
     if (this.telegraphRemainingMs > 0) {
       this.telegraphRemainingMs = Math.max(0, this.telegraphRemainingMs - delta);
+      // Keep riding the perimeter at this world angle while telegraphing,
+      // rather than sitting at the fixed point it happened to spawn at - a
+      // rotating arena's wall would otherwise sweep out from under a
+      // stationary marker, leaving it visibly detached in open space until
+      // it snapped into motion once telegraphing ended.
+      const point = arena.boundaryPointAtAngle(this.perimeterAngle);
+      this.x = point.x;
+      this.y = point.y;
       this.redraw();
       return false;
     }
