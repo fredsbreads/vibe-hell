@@ -1,6 +1,5 @@
 import Phaser from "phaser";
 import { DualSenseMap, isPadButtonDown } from "../input/DualSenseMap";
-import { getAimMode, cycleAimMode } from "../config/settings";
 
 const MIN_START_WAVE = 1;
 const MAX_START_WAVE = 20;
@@ -9,16 +8,15 @@ const START_WAVE_REGISTRY_KEY = "startWave";
 /** How far the left stick must tilt to count as an Up/Down/Left/Right navigation press. */
 const STICK_THRESHOLD = 0.5;
 
-const PLAY_FOCUS_COLOR = "#ffffff";
-const PLAY_UNFOCUSED_COLOR = "#ffe98a";
+const PLAY_FOCUS_COLOR = "#ffe98a";
+const PLAY_UNFOCUSED_COLOR = "#ffffff";
 const FOCUS_COLOR = "#ffffff";
 const UNFOCUSED_COLOR = "#59f2c8";
 
-type FocusRow = 0 | 1 | 2;
+type FocusRow = 0 | 1;
 const PLAY_ROW: FocusRow = 0;
 const WAVE_ROW: FocusRow = 1;
-const AIM_ROW: FocusRow = 2;
-const ROW_COUNT = 3;
+const ROW_COUNT = 2;
 
 /**
  * The game's title screen, shown on boot and whenever the player backs out
@@ -26,15 +24,14 @@ const ROW_COUNT = 3;
  * gamepad Cross press - available regardless of which row is focused, since
  * it's the primary action.
  *
- * Below PLAY sit two adjustable rows - the start-wave stepper (handy for
- * testing/demoing harder waves without playing through the early ones) and
- * the aim-mode toggle. Up/Down (arrow keys, D-pad, or the left stick) moves
- * a highlighted focus between all three rows (starting on PLAY), and
- * Left/Right adjusts whichever of the two lower rows is focused -
- * decrementing/incrementing the wave, or cycling the aim mode. Left/Right
- * do nothing while PLAY is focused - it isn't a value to adjust, just the
- * safe default so an accidental Left/Right press before ever navigating
- * down can't silently change anything.
+ * Below PLAY sits the start-wave stepper (handy for testing/demoing harder
+ * waves without playing through the early ones). Up/Down (arrow keys,
+ * D-pad, or the left stick) moves a highlighted focus between PLAY and the
+ * stepper (starting on PLAY), and Left/Right decrements/increments the wave
+ * while the stepper is focused - a no-op while PLAY is focused, since it
+ * isn't a value to adjust, just the safe default so an accidental
+ * Left/Right press before ever navigating down can't silently change
+ * anything.
  */
 export class TitleScene extends Phaser.Scene {
   private prevCrossHeld = false;
@@ -47,7 +44,6 @@ export class TitleScene extends Phaser.Scene {
   private focusedRow: FocusRow = PLAY_ROW;
   private playButton!: Phaser.GameObjects.Text;
   private startWaveText!: Phaser.GameObjects.Text;
-  private aimModeText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("TitleScene");
@@ -118,10 +114,9 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.createWaveStepper(width / 2, height / 2 + 170);
-    this.createAimModeToggle(width / 2, height / 2 + 210);
 
     this.add
-      .text(width / 2, height / 2 + 245, "Up/Down to select · Left/Right to adjust", {
+      .text(width / 2, height / 2 + 205, "Up/Down to select · Left/Right to adjust", {
         fontFamily: "monospace",
         fontSize: "11px",
         color: "#4a4a5a",
@@ -219,32 +214,6 @@ export class TitleScene extends Phaser.Scene {
     this.refreshStartWaveText();
   }
 
-  /**
-   * Cycles between the three aim modes (see settings.ts: free / virtualStick /
-   * movement) - Left/Right while this row is focused, or a click. Persisted
-   * via settings.ts so it's remembered on the next visit, not just this
-   * session.
-   */
-  private createAimModeToggle(centerX: number, y: number): void {
-    this.aimModeText = this.add
-      .text(centerX, y, "", {
-        fontFamily: "monospace",
-        fontSize: "16px",
-        color: UNFOCUSED_COLOR,
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-
-    this.aimModeText.on("pointerover", () => this.setFocusedRow(AIM_ROW));
-    this.aimModeText.on("pointerdown", () => {
-      this.setFocusedRow(AIM_ROW);
-      cycleAimMode(1);
-      this.refreshAimModeText();
-    });
-
-    this.refreshAimModeText();
-  }
-
   private moveFocus(delta: number): void {
     this.focusedRow = (((this.focusedRow + delta) % ROW_COUNT + ROW_COUNT) % ROW_COUNT) as FocusRow;
     this.refreshFocusHighlight();
@@ -258,27 +227,14 @@ export class TitleScene extends Phaser.Scene {
   private adjustFocusedRow(delta: 1 | -1): void {
     if (this.focusedRow === WAVE_ROW) {
       this.adjustStartWave(delta);
-    } else if (this.focusedRow === AIM_ROW) {
-      cycleAimMode(delta);
-      this.refreshAimModeText();
     }
     // PLAY_ROW: Left/Right intentionally do nothing - it isn't an adjustable value.
   }
 
-  /** Colors whichever row is currently focused white, and the other rows their normal color - mirrors the pause menu's highlight convention. */
+  /** Colors whichever row is currently focused, and the other row its normal color - mirrors the pause menu's highlight convention. */
   private refreshFocusHighlight(): void {
     this.playButton.setColor(this.focusedRow === PLAY_ROW ? PLAY_FOCUS_COLOR : PLAY_UNFOCUSED_COLOR);
     this.startWaveText.setColor(this.focusedRow === WAVE_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
-    this.aimModeText.setColor(this.focusedRow === AIM_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
-  }
-
-  private refreshAimModeText(): void {
-    const labels: Record<ReturnType<typeof getAimMode>, string> = {
-      free: "AIM: FREE (STICK/MOUSE)",
-      virtualStick: "AIM: VIRTUAL STICK (MOUSE)",
-      movement: "AIM: MOVEMENT (KEYBOARD-ONLY)",
-    };
-    this.aimModeText.setText(`[ ${labels[getAimMode()]} ]`);
   }
 
   private adjustStartWave(delta: number): void {

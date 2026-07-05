@@ -19,12 +19,3 @@ export function getAimMode(): AimMode {
   const stored = localStorage.getItem(AIM_MODE_STORAGE_KEY);
   return (AIM_MODE_CYCLE as string[]).includes(stored ?? "") ? (stored as AimMode) : "free";
 }
-
-/** Steps the aim mode forward (1) or backward (-1) through the cycle, wrapping at either end. */
-export function cycleAimMode(direction: 1 | -1): AimMode {
-  const current = getAimMode();
-  const count = AIM_MODE_CYCLE.length;
-  const next = AIM_MODE_CYCLE[(AIM_MODE_CYCLE.indexOf(current) + direction + count) % count];
-  localStorage.setItem(AIM_MODE_STORAGE_KEY, next);
-  return next;
-}
