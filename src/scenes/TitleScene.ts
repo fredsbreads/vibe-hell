@@ -9,26 +9,32 @@ const START_WAVE_REGISTRY_KEY = "startWave";
 /** How far the left stick must tilt to count as an Up/Down/Left/Right navigation press. */
 const STICK_THRESHOLD = 0.5;
 
+const PLAY_FOCUS_COLOR = "#ffffff";
+const PLAY_UNFOCUSED_COLOR = "#ffe98a";
 const FOCUS_COLOR = "#ffffff";
 const UNFOCUSED_COLOR = "#59f2c8";
 
-type FocusRow = 0 | 1;
-const WAVE_ROW: FocusRow = 0;
-const AIM_ROW: FocusRow = 1;
-const ROW_COUNT = 2;
+type FocusRow = 0 | 1 | 2;
+const PLAY_ROW: FocusRow = 0;
+const WAVE_ROW: FocusRow = 1;
+const AIM_ROW: FocusRow = 2;
+const ROW_COUNT = 3;
 
 /**
  * The game's title screen, shown on boot and whenever the player backs out
  * from a Game Over. Starts MainScene on Enter/Space, a click on PLAY, or a
- * gamepad Cross press.
+ * gamepad Cross press - available regardless of which row is focused, since
+ * it's the primary action.
  *
  * Below PLAY sit two adjustable rows - the start-wave stepper (handy for
  * testing/demoing harder waves without playing through the early ones) and
  * the aim-mode toggle. Up/Down (arrow keys, D-pad, or the left stick) moves
- * a highlighted focus between these two rows, and Left/Right adjusts
- * whichever one is focused - the same "select a row, then adjust it"
- * pattern a console settings menu uses, rather than a fixed button doing a
- * fixed thing regardless of context.
+ * a highlighted focus between all three rows (starting on PLAY), and
+ * Left/Right adjusts whichever of the two lower rows is focused -
+ * decrementing/incrementing the wave, or cycling the aim mode. Left/Right
+ * do nothing while PLAY is focused - it isn't a value to adjust, just the
+ * safe default so an accidental Left/Right press before ever navigating
+ * down can't silently change anything.
  */
 export class TitleScene extends Phaser.Scene {
   private prevCrossHeld = false;
@@ -38,7 +44,8 @@ export class TitleScene extends Phaser.Scene {
   private prevDpadRightHeld = false;
   private started = false;
   private startWave = MIN_START_WAVE;
-  private focusedRow: FocusRow = WAVE_ROW;
+  private focusedRow: FocusRow = PLAY_ROW;
+  private playButton!: Phaser.GameObjects.Text;
   private startWaveText!: Phaser.GameObjects.Text;
   private aimModeText!: Phaser.GameObjects.Text;
 
@@ -49,7 +56,7 @@ export class TitleScene extends Phaser.Scene {
   create(): void {
     const { width, height } = this.scale;
     this.started = false;
-    this.focusedRow = WAVE_ROW;
+    this.focusedRow = PLAY_ROW;
     // Seed from whatever's ACTUALLY currently held, not blindly false - this
     // screen is frequently entered via a gamepad Cross press (confirming
     // "Main Menu" from the pause overlay, or Restart-then-Main-Menu), and
@@ -85,18 +92,22 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const playButton = this.add
+    this.playButton = this.add
       .text(width / 2, height / 2 + 60, "PLAY", {
         fontFamily: "monospace",
         fontSize: "28px",
-        color: "#ffe98a",
+        color: PLAY_UNFOCUSED_COLOR,
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
-    playButton.on("pointerover", () => playButton.setColor("#ffffff"));
-    playButton.on("pointerout", () => playButton.setColor("#ffe98a"));
-    playButton.on("pointerdown", () => this.startGame());
+    // pointerover is a real browser hover-enter event, not a per-frame position
+    // poll, so (unlike MenuOverlay's hover sync) it can't fire from incidental
+    // cursor jitter while the mouse sits still - safe to let it also move
+    // keyboard/gamepad focus without risking silently overriding a deliberate
+    // D-pad/stick navigation the way continuous polling could.
+    this.playButton.on("pointerover", () => this.setFocusedRow(PLAY_ROW));
+    this.playButton.on("pointerdown", () => this.startGame());
 
     this.add
       .text(width / 2, height / 2 + 110, "Enter / Click / Cross to start", {
@@ -176,7 +187,7 @@ export class TitleScene extends Phaser.Scene {
     minusButton.on("pointerover", () => minusButton.setColor("#ffffff"));
     minusButton.on("pointerout", () => minusButton.setColor("#59f2c8"));
     minusButton.on("pointerdown", () => {
-      this.focusedRow = WAVE_ROW;
+      this.setFocusedRow(WAVE_ROW);
       this.adjustStartWave(-1);
     });
 
@@ -188,10 +199,7 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
-    this.startWaveText.on("pointerdown", () => {
-      this.focusedRow = WAVE_ROW;
-      this.refreshFocusHighlight();
-    });
+    this.startWaveText.on("pointerover", () => this.setFocusedRow(WAVE_ROW));
 
     const plusButton = this.add
       .text(centerX + 110, y, "+", {
@@ -204,7 +212,7 @@ export class TitleScene extends Phaser.Scene {
     plusButton.on("pointerover", () => plusButton.setColor("#ffffff"));
     plusButton.on("pointerout", () => plusButton.setColor("#59f2c8"));
     plusButton.on("pointerdown", () => {
-      this.focusedRow = WAVE_ROW;
+      this.setFocusedRow(WAVE_ROW);
       this.adjustStartWave(1);
     });
 
@@ -227,32 +235,39 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
+    this.aimModeText.on("pointerover", () => this.setFocusedRow(AIM_ROW));
     this.aimModeText.on("pointerdown", () => {
-      this.focusedRow = AIM_ROW;
+      this.setFocusedRow(AIM_ROW);
       cycleAimMode(1);
       this.refreshAimModeText();
-      this.refreshFocusHighlight();
     });
 
     this.refreshAimModeText();
   }
 
   private moveFocus(delta: number): void {
-    this.focusedRow = (((this.focusedRow + delta) % ROW_COUNT) + ROW_COUNT) as FocusRow;
+    this.focusedRow = (((this.focusedRow + delta) % ROW_COUNT + ROW_COUNT) % ROW_COUNT) as FocusRow;
+    this.refreshFocusHighlight();
+  }
+
+  private setFocusedRow(row: FocusRow): void {
+    this.focusedRow = row;
     this.refreshFocusHighlight();
   }
 
   private adjustFocusedRow(delta: 1 | -1): void {
     if (this.focusedRow === WAVE_ROW) {
       this.adjustStartWave(delta);
-    } else {
+    } else if (this.focusedRow === AIM_ROW) {
       cycleAimMode(delta);
       this.refreshAimModeText();
     }
+    // PLAY_ROW: Left/Right intentionally do nothing - it isn't an adjustable value.
   }
 
-  /** Colors whichever row is currently focused white, and the other row teal - mirrors the pause menu's highlight convention. */
+  /** Colors whichever row is currently focused white, and the other rows their normal color - mirrors the pause menu's highlight convention. */
   private refreshFocusHighlight(): void {
+    this.playButton.setColor(this.focusedRow === PLAY_ROW ? PLAY_FOCUS_COLOR : PLAY_UNFOCUSED_COLOR);
     this.startWaveText.setColor(this.focusedRow === WAVE_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
     this.aimModeText.setColor(this.focusedRow === AIM_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
   }

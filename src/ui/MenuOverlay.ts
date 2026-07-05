@@ -10,8 +10,13 @@ const TEXT_DEPTH = 21;
 // Minimum screen-pixel movement between frames to count as "the mouse was just
 // used" - otherwise a cursor merely resting over a button (e.g. left over from
 // an earlier click, while the player has since switched to keyboard/gamepad)
-// would keep re-stealing focus back onto itself every frame.
-const MOUSE_MOVE_THRESHOLD = 2;
+// would keep re-stealing focus back onto itself every frame. Deliberately
+// generous (not just enough to filter float jitter): small incidental cursor
+// drift - a twitchy trackpad, an OS accessibility nudge, anything short of
+// actually aiming at a different button - shouldn't be able to silently steal
+// focus away from a deliberate D-pad/stick navigation. Buttons are 44px apart,
+// so genuine mouse movement toward a different one clears this easily.
+const MOUSE_MOVE_THRESHOLD = 24;
 
 /**
  * A reusable full-screen dimmed overlay with a title, optional subtitle, and
