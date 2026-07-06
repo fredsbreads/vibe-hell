@@ -109,7 +109,7 @@ export class Player {
   }
 
   update(delta: number): void {
-    const state = this.input.read(this.sprite.x, this.sprite.y);
+    const state = this.input.read(this.position.x, this.position.y);
     this.aimAngle = state.aimAngle;
 
     this.tickCooldowns(delta);
@@ -138,6 +138,27 @@ export class Player {
 
     this.redrawAimIndicator();
     this.redrawStatusText();
+  }
+
+  /**
+   * The player's true current-frame position, read from the physics body
+   * rather than sprite.x/y. Arcade Physics integrates velocity into
+   * body.position during its own WORLD update phase, which Phaser runs
+   * BEFORE Scene.update() (see Systems#step: PRE_UPDATE, then UPDATE - which
+   * is where the physics world moves bodies - then the scene's own update,
+   * then POST_UPDATE, which is what copies body.position into sprite.x/y).
+   * So anything read here during our own update() sees the position as of
+   * the END of the PREVIOUS frame - one full frame stale relative to what's
+   * about to actually render. Imperceptible at a smooth framerate, but
+   * visibly detaches anything drawn from it (the aim indicator, the Slash
+   * arc/hitbox) from the sprite's real rendered position when frame time is
+   * large. clampToArena/clipOutwardComponent already learned this the hard
+   * way (see their comments) - this getter reuses that same fix everywhere
+   * else position matters mid-frame.
+   */
+  private get position(): { x: number; y: number } {
+    const body = this.sprite.body as Phaser.Physics.Arcade.Body;
+    return body.center;
   }
 
   get currentHp(): number {
@@ -186,8 +207,8 @@ export class Player {
       return null;
     }
     return {
-      x: this.sprite.x,
-      y: this.sprite.y,
+      x: this.position.x,
+      y: this.position.y,
       angle: this.slashAngle,
       range: SLASH_RANGE,
       arcWidth: SLASH_ARC_WIDTH,
@@ -295,8 +316,8 @@ export class Player {
     this.slashGraphic.lineStyle(4, 0xf2e85c, 1);
     this.slashGraphic.beginPath();
     this.slashGraphic.arc(
-      this.sprite.x,
-      this.sprite.y,
+      this.position.x,
+      this.position.y,
       SLASH_RANGE,
       this.slashAngle - SLASH_ARC_WIDTH / 2,
       this.slashAngle + SLASH_ARC_WIDTH / 2,
@@ -441,9 +462,10 @@ export class Player {
   private redrawAimIndicator(): void {
     this.aimIndicator.clear();
     this.aimIndicator.lineStyle(2, 0x59f2c8, 0.8);
-    const tipX = this.sprite.x + Math.cos(this.aimAngle) * 36;
-    const tipY = this.sprite.y + Math.sin(this.aimAngle) * 36;
-    this.aimIndicator.lineBetween(this.sprite.x, this.sprite.y, tipX, tipY);
+    const { x, y } = this.position;
+    const tipX = x + Math.cos(this.aimAngle) * 36;
+    const tipY = y + Math.sin(this.aimAngle) * 36;
+    this.aimIndicator.lineBetween(x, y, tipX, tipY);
   }
 
   private redrawStatusText(): void {
