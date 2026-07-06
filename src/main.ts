@@ -1,9 +1,13 @@
 import Phaser from "phaser";
 import { TitleScene } from "./scenes/TitleScene";
 import { MainScene } from "./scenes/MainScene";
-import { patchPhaserGamepadPluginSparseArrayBug } from "./input/phaserGamepadPatch";
+import {
+  patchPhaserGamepadPluginSparseArrayBug,
+  patchPhaserGamepadPluginStalePadReferenceBug,
+} from "./input/phaserGamepadPatch";
 
 patchPhaserGamepadPluginSparseArrayBug();
+patchPhaserGamepadPluginStalePadReferenceBug();
 
 new Phaser.Game({
   type: Phaser.AUTO,

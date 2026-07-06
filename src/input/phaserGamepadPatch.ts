@@ -38,3 +38,49 @@ export function patchPhaserGamepadPluginSparseArrayBug(): void {
     originalDisconnectAll.call(this);
   };
 }
+
+interface GamepadWrapper {
+  index: number;
+}
+
+/**
+ * Phaser's `refreshPads()` has a branch for when the same gamepad slot
+ * reports a Gamepad with a different `id` string (a real DualSense-on-Mac
+ * quirk - happens on things like a Bluetooth mode switch or reconnect that
+ * keeps the same slot): it destroys the old wrapper and stores a brand new
+ * one in `this.gamepads[index]`, but never re-points `_pad1`/`_pad2`/etc if
+ * they were referencing the old one. `pad1` then permanently returns the
+ * destroyed wrapper - `leftStick`/`rightStick` stay frozen at their last
+ * values forever (they're plain fields, not getters, so no error), and
+ * `isButtonDown`/`getButtonValue` silently see an empty `buttons` array
+ * (destroy() clears it) and just always report "not pressed" - the pad
+ * looks fully connected but every input silently stops registering, with no
+ * console error. Reproduced directly: fake a same-slot id change and watch
+ * `pad1.leftStick.x` freeze at its pre-change value forever.
+ *
+ * Fixed by re-syncing each `_padN` reference to whatever's actually stored
+ * in `this.gamepads` at that same index immediately after every refresh.
+ */
+export function patchPhaserGamepadPluginStalePadReferenceBug(): void {
+  const proto = Phaser.Input.Gamepad.GamepadPlugin.prototype as unknown as {
+    gamepads: (GamepadWrapper | undefined)[];
+    refreshPads: () => void;
+    _pad1?: GamepadWrapper;
+    _pad2?: GamepadWrapper;
+    _pad3?: GamepadWrapper;
+    _pad4?: GamepadWrapper;
+  };
+
+  const padKeys = ["_pad1", "_pad2", "_pad3", "_pad4"] as const;
+
+  const originalRefreshPads = proto.refreshPads;
+  proto.refreshPads = function (this: typeof proto) {
+    originalRefreshPads.call(this);
+    for (const key of padKeys) {
+      const current = this[key];
+      if (current && this.gamepads[current.index] !== current) {
+        this[key] = this.gamepads[current.index];
+      }
+    }
+  };
+}
