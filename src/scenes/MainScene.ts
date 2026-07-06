@@ -190,12 +190,7 @@ export class MainScene extends Phaser.Scene {
     // or arriving fresh right as MainScene starts), and a still-held button
     // read as false-to-true here would misfire as a brand new confirm/cancel
     // press the instant this scene starts polling.
-    const pad = this.input.gamepad?.pad1;
-    this.prevEscHeld = this.escKey.isDown || isPadButtonDown(pad, DualSenseMap.OPTIONS);
-    this.prevConfirmHeld = this.confirmKey.isDown || isPadButtonDown(pad, DualSenseMap.CROSS);
-    this.prevCancelHeld = isPadButtonDown(pad, DualSenseMap.CIRCLE);
-    this.prevMenuUpHeld = this.menuUpKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_UP);
-    this.prevMenuDownHeld = this.menuDownKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_DOWN);
+    this.resyncMenuNavHeldState();
 
     this.setupDebugSpawnToggles();
   }
@@ -346,10 +341,38 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Seeds the menu nav edge-detection fields from whatever's ACTUALLY held
+   * right now, not blindly false. pollMenuInputs only updates these while a
+   * menu is already open (uiState !== "playing"), so they go stale while
+   * just playing normally - if the player is holding a movement direction
+   * (D-pad, left stick, or the arrow keys) at the exact moment a menu opens
+   * (dying mid-move is the common case), the stale "not held" would read
+   * that still-held direction as a brand new press and immediately bump the
+   * highlighted option off its intended default the instant the menu
+   * appears. Called whenever a menu is about to start being polled: scene
+   * create, and every transition into "paused"/"gameOver".
+   */
+  private resyncMenuNavHeldState(): void {
+    const pad = this.input.gamepad?.pad1;
+    const stickY = pad?.leftStick.y ?? 0;
+    this.prevEscHeld = this.escKey.isDown || isPadButtonDown(pad, DualSenseMap.OPTIONS);
+    this.prevConfirmHeld = this.confirmKey.isDown || isPadButtonDown(pad, DualSenseMap.CROSS);
+    this.prevCancelHeld = isPadButtonDown(pad, DualSenseMap.CIRCLE);
+    // Must match pollMenuInputs's upHeld/downHeld exactly (stick included, not
+    // just D-pad/keyboard) - otherwise holding the stick (not the D-pad) at
+    // the moment a menu opens still seeds a false "not held" and misfires.
+    this.prevMenuUpHeld =
+      this.menuUpKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_UP) || stickY < -MENU_STICK_THRESHOLD;
+    this.prevMenuDownHeld =
+      this.menuDownKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_DOWN) || stickY > MENU_STICK_THRESHOLD;
+  }
+
   private enterPause(): void {
     this.uiState = "paused";
     this.physics.pause();
     this.tweens.pauseAll();
+    this.resyncMenuNavHeldState();
     this.menuOverlay.show("PAUSED", "", [
       { label: "RESUME", onSelect: () => this.exitPause() },
       { label: "RESTART", onSelect: () => this.restartRun() },
@@ -374,6 +397,7 @@ export class MainScene extends Phaser.Scene {
     this.uiState = "gameOver";
     this.physics.pause();
     this.tweens.pauseAll();
+    this.resyncMenuNavHeldState();
     const stats = `Wave ${this.waveManager.currentWave}   Threats Endured: ${this.threatsEndured}`;
     this.menuOverlay.show("GAME OVER", stats, [
       { label: "RESTART", onSelect: () => this.restartRun() },
