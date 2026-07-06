@@ -20,7 +20,7 @@ type UiState = "playing" | "paused" | "gameOver";
 /** One full rotation every 30s for spinning arena shapes - slow enough to track, per the GDD's "Spin" wave stage. */
 const ARENA_ROTATION_RAD_PER_MS = (Math.PI * 2) / 30000;
 
-/** How long R (or gamepad Square) must be held while paused/game-over before it triggers a restart. */
+/** How long R (or gamepad Triangle) must be held while paused/game-over before it triggers a restart. */
 const RESTART_HOLD_DURATION_MS = 500;
 
 /** How far the left stick must tilt vertically to count as an Up/Down menu-navigation press. */
@@ -111,7 +111,7 @@ export class MainScene extends Phaser.Scene {
     this.virtualStickGraphic = this.add.graphics().setScrollFactor(0).setDepth(15);
 
     this.player = new Player(this, arenaBounds.centerX, arenaBounds.centerY, this.arena);
-    // A restart can happen while Cross (or Square) is still physically held
+    // A restart can happen while Cross (or Triangle) is still physically held
     // down from confirming Restart in the menu - without this, the brand new
     // Player's dash edge-detection would start blind (assume nothing was
     // held) and misread that still-held button as a fresh dash the instant
@@ -263,7 +263,7 @@ export class MainScene extends Phaser.Scene {
    * first place. While a menu is open, Up/Down (arrow keys, D-pad, or the
    * left stick) move the highlighted option and Enter/Cross activates it -
    * the standard "highlight + confirm" pattern, rather than a fixed key/
-   * button per menu item. R/Square is a separate direct Restart shortcut
+   * button per menu item. R/Triangle is a separate direct Restart shortcut
    * (held, to guard against an accidental press) that works in any uiState,
    * not just while a menu is open. Polled with edge-detection (like
    * PlayerInput) since Phaser doesn't expose gamepad button presses as
@@ -293,12 +293,12 @@ export class MainScene extends Phaser.Scene {
     }
 
     // Restart discards the current run, so it requires a brief hold rather than an
-    // instant tap - a stray/reflexive press of R (or Square) shouldn't be able to
+    // instant tap - a stray/reflexive press of R (or Triangle) shouldn't be able to
     // wipe out progress. Works in every uiState (mid-run included, not just paused/
     // game-over) so you can bail out and restart without pausing first.
     // restartHoldText shows the hold building up so it reads as a deliberate confirm
     // gesture instead of the key just not working.
-    const restartHeld = this.restartKey.isDown || isPadButtonDown(pad, DualSenseMap.SQUARE);
+    const restartHeld = this.restartKey.isDown || isPadButtonDown(pad, DualSenseMap.TRIANGLE);
     if (restartHeld) {
       this.restartHoldMs += delta;
       if (this.restartHoldMs >= RESTART_HOLD_DURATION_MS) {
