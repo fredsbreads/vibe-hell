@@ -22,7 +22,15 @@ export class BasicProjectile extends LinearProjectile {
     super(scene, "basic-projectile", BASIC_PROJECTILE_SPEED, BASIC_PROJECTILE_RADIUS, MAX_LIFETIME_MS);
   }
 
-  /** Moves and bounces off the arena wall. Returns true if it has drifted well past the wall, used up all its bounces after being deflected, or lived past its 10s cap, and should be despawned. */
+  /**
+   * Moves and bounces off the arena wall. Returns true if it has drifted well
+   * past the wall, used up all its bounces after being deflected, or (while
+   * still hostile) lived past its 10s cap, and should be despawned. The 10s
+   * cap only applies before deflection - once deflected, its original
+   * lifetime countdown (which keeps ticking in the background regardless) no
+   * longer applies, so despawning is driven solely by the 3-bounce cap
+   * instead of potentially cutting a late-life deflect short.
+   */
   step(delta: number, arena: Arena, _playerX: number, _playerY: number): boolean {
     if (!this.move(delta, arena)) {
       return false;
@@ -31,6 +39,10 @@ export class BasicProjectile extends LinearProjectile {
     this.bounceOffWall(arena);
     if (this.hasUsedAllDeflectedBounces()) {
       return true;
+    }
+
+    if (this.deflected) {
+      return this.hasEscaped(arena);
     }
 
     return this.hasEscaped(arena) || this.hasExpired();
