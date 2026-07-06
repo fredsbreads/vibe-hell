@@ -29,13 +29,17 @@ const MENU_STICK_THRESHOLD = 0.5;
 /**
  * Arena shapes available each round - also reachable manually via debug key 4.
  * A regular n-gon's flat sides sit closer to the center than its corners do
- * (apothem = circumradius * cos(pi/n)), so lower-n shapes like Square pinch in
- * noticeably more at the edges than higher-n ones for the same radius; Pentagon
- * sits between Square and Hexagon on that scale.
+ * (apothem = circumradius * cos(pi/n)), so lower-n shapes pinch in noticeably
+ * more at the edges than higher-n ones for the same radius; Pentagon sits
+ * between Square and Hexagon on that scale.
+ *
+ * Square is deliberately excluded for now - it pinches in enough to feel
+ * cramped, especially for later/harder waves where room to maneuver matters
+ * most. Left out of rotation rather than deleted in case it's worth
+ * reincorporating later (e.g. rebalanced, or scoped to just early waves).
  */
 const ARENA_SHAPE_CYCLE: Array<{ label: string; build: (bounds: ArenaBounds) => ArenaShape }> = [
   { label: "Circle", build: (bounds) => new CircleArena(bounds) },
-  { label: "Square", build: (bounds) => new PolygonArena(bounds, 4, ARENA_ROTATION_RAD_PER_MS) },
   { label: "Pentagon", build: (bounds) => new PolygonArena(bounds, 5, ARENA_ROTATION_RAD_PER_MS) },
   { label: "Hexagon", build: (bounds) => new PolygonArena(bounds, 6, ARENA_ROTATION_RAD_PER_MS) },
   { label: "Octagon", build: (bounds) => new PolygonArena(bounds, 8, ARENA_ROTATION_RAD_PER_MS) },
