@@ -80,14 +80,6 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    this.add
-      .text(width / 2, height / 2 - 20, "twin-stick bullet hell", {
-        fontFamily: "monospace",
-        fontSize: "16px",
-        color: "#8a8aa0",
-      })
-      .setOrigin(0.5);
-
     this.playButton = this.add
       .text(width / 2, height / 2 + 60, "PLAY", {
         fontFamily: "monospace",
