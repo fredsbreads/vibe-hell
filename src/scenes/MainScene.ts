@@ -523,17 +523,17 @@ export class MainScene extends Phaser.Scene {
     const shapeLabel = ARENA_SHAPE_CYCLE[this.arenaShapeIndex].label;
     let text = `[DEBUG] 1: Zoomer ${zoomerState}   2: Stop Wave ${stopWaveState}   3: Chaser ${chaserState}   4: Arena (${shapeLabel})`;
 
-    // Temporary raw-gamepad readout for diagnosing controllers whose reported
-    // mapping/axis layout doesn't match the W3C "standard" assumption
-    // DualSenseMap and PlayerInput are built on (e.g. Switch Pro Controller).
-    // Shows the browser's unfiltered native axes array, not Phaser's own
-    // leftStick/rightStick interpretation of it.
-    const rawPad = this.input.gamepad?.pad1?.pad;
-    if (rawPad) {
-      const axes = Array.from(rawPad.axes as number[])
-        .map((value, i) => `${i}:${value.toFixed(2)}`)
-        .join(" ");
-      text += `\n[PAD] mapping="${rawPad.mapping}" buttons=${rawPad.buttons.length} axes=[${axes}]`;
+    // Temporary diagnostic: shows exactly what our own input code reads from
+    // Phaser's parsed Gamepad (not the raw browser axes array), so we can see
+    // whether input genuinely stops reaching our code after a scene
+    // transition, versus the pad simply not being present at all.
+    const pad = this.input.gamepad?.pad1;
+    if (pad) {
+      const cross = isPadButtonDown(pad, DualSenseMap.CROSS) ? "1" : "0";
+      const circle = isPadButtonDown(pad, DualSenseMap.CIRCLE) ? "1" : "0";
+      text += `\n[PAD] connected=${pad.connected} left=(${pad.leftStick.x.toFixed(2)},${pad.leftStick.y.toFixed(2)}) right=(${pad.rightStick.x.toFixed(2)},${pad.rightStick.y.toFixed(2)}) cross=${cross} circle=${circle}`;
+    } else {
+      text += `\n[PAD] no pad1`;
     }
 
     this.debugText.setText(text);
