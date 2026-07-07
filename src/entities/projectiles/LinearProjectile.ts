@@ -31,7 +31,7 @@ const DEFLECT_SCALES: readonly number[] = [1, 1, 1.15, 1.3];
  * Toggled via setActive/setVisible rather than created/destroyed for pooling.
  */
 export abstract class LinearProjectile extends Phaser.GameObjects.Image {
-  readonly radius: number;
+  private readonly baseRadius: number;
 
   protected readonly speed: number;
   protected vx = 0;
@@ -69,7 +69,7 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   constructor(scene: Phaser.Scene, textureKey: string, speed: number, radius: number, maxLifetimeMs = Infinity) {
     super(scene, 0, 0, textureKey);
     this.speed = speed;
-    this.radius = radius;
+    this.baseRadius = radius;
     this.maxLifetimeMs = maxLifetimeMs;
     this.lifetimeRemainingMs = maxLifetimeMs;
     scene.add.existing(this);
@@ -104,6 +104,18 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   /** True once this has been deflected at least once (tier 1-3) - friendly from here on, regardless of tier. */
   get deflected(): boolean {
     return this.deflectTierValue > 0;
+  }
+
+  /**
+   * The projectile's current effective radius - scales with DEFLECT_SCALES,
+   * so a visually-bigger tier-2/3 projectile is also genuinely easier to
+   * re-hit/collide with, rather than looking bigger while its real hit/kill
+   * radius secretly stays at the original size. Feeds every radius-dependent
+   * check uniformly (Slash re-hit, wall bounce clearance, deflected-vs-
+   * hostile kill contact) rather than special-casing just one of them.
+   */
+  get radius(): number {
+    return this.baseRadius * DEFLECT_SCALES[this.deflectTierValue];
   }
 
   get deflectTier(): number {
