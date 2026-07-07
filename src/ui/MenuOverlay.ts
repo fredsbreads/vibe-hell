@@ -168,7 +168,7 @@ export class MenuOverlay {
       });
     }
     this.buttonTexts.forEach((text, i) => {
-      text.setColor(i === this.focusedIndex ? "#ffffff" : "#59f2c8");
+      text.setColor(i === this.focusedIndex ? "#ffe98a" : "#59f2c8");
     });
   }
 
