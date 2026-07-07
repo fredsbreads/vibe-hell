@@ -44,6 +44,8 @@ export interface SlashHitbox {
   angle: number;
   range: number;
   arcWidth: number;
+  /** Identifies which distinct swing this hitbox belongs to - a single swing stays active for several frames, and without this a projectile eligible for re-hitting (tiered deflect) could get hit multiple times by the same swing before it moves out of range. */
+  swingId: number;
 }
 
 export class Player {
@@ -66,6 +68,7 @@ export class Player {
   private slashAngle = 0;
   private slashActiveRemainingMs = 0;
   private slashCooldownRemainingMs = 0;
+  private slashSwingId = 0;
 
   private hp = STARTING_HP;
   private hitGraceRemainingMs = 0;
@@ -212,6 +215,7 @@ export class Player {
       angle: this.slashAngle,
       range: SLASH_RANGE,
       arcWidth: SLASH_ARC_WIDTH,
+      swingId: this.slashSwingId,
     };
   }
 
@@ -291,6 +295,7 @@ export class Player {
     this.slashAngle = angle;
     this.slashActiveRemainingMs = SLASH_DURATION_MS;
     this.slashCooldownRemainingMs = SLASH_COOLDOWN_MS;
+    this.slashSwingId++;
     this.redrawSlashArc();
   }
 

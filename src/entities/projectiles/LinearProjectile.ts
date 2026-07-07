@@ -42,6 +42,17 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   /** 0 = still hostile. 1-3 = how many times it's been deflected; see deflect(). */
   private deflectTierValue = 0;
   private deflectedBounceCount = 0;
+  /**
+   * Which Slash swing (Player#slashSwingId) last tiered this up. A single
+   * swing's hitbox stays active for several frames (SLASH_DURATION_MS), and
+   * without this an already-deflected-but-not-max-tier projectile would be
+   * eligible to get hit again on the very next frame by that SAME swing
+   * before it ever moves out of range - tiering it up 2-3 times from what
+   * should be one hit. -1 (no real swingId is ever negative) so a freshly
+   * spawned/recycled projectile is never mistaken for already having been
+   * hit by whatever swing happens to be active.
+   */
+  private lastDeflectedBySwingId = -1;
   private deflectBounceCap = DEFLECT_BASE_BOUNCE_CAP;
   /** The speed deflected movement uses, compounding each additional deflect - starts from the projectile's own base speed on the 1st deflect. */
   private deflectSpeed = 0;
@@ -77,6 +88,7 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     this.deflectTierValue = 0;
     this.deflectedBounceCount = 0;
     this.deflectBounceCap = DEFLECT_BASE_BOUNCE_CAP;
+    this.lastDeflectedBySwingId = -1;
     this.clearTint();
     this.setScale(1);
     this.setAlpha(TELEGRAPH_START_ALPHA);
@@ -104,6 +116,19 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   }
 
   /**
+   * True if a swing with this ID is allowed to deflect/tier-up this
+   * projectile - false once it's maxed out, or if this exact swing already
+   * hit it. A single swing's hitbox stays active for several frames
+   * (SLASH_DURATION_MS), so without the swingId check, an already-deflected
+   * (not yet max tier) projectile sitting in range would get tiered up again
+   * on the very next frame by that SAME swing, before it ever moves out of
+   * range - turning one hit into 2-3.
+   */
+  canBeDeflectedBy(swingId: number): boolean {
+    return !this.isMaxDeflectTier && this.lastDeflectedBySwingId !== swingId;
+  }
+
+  /**
    * Converts an active hostile projectile into a friendly deflected one (1st
    * deflect), or escalates an already-deflected one to its next tier (2nd/3rd
    * deflect) - fired off in the player's current aim direction each time.
@@ -118,12 +143,15 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
    * Recolored/rescaled per tier (cosmetic only; the collision radius never
    * changes) so a charged-up projectile reads as more dangerous at a glance.
    * Destroys any hostile projectile it touches for as long as it's alive,
-   * at every tier (see ProjectileManager).
+   * at every tier (see ProjectileManager). Callers must check
+   * canBeDeflectedBy(swingId) first - this only guards against exceeding the
+   * max tier, not against the same swing hitting it twice.
    */
-  deflect(aimAngle: number): void {
+  deflect(aimAngle: number, swingId: number): void {
     if (this.isMaxDeflectTier) {
       return;
     }
+    this.lastDeflectedBySwingId = swingId;
     this.deflectTierValue += 1;
 
     if (this.deflectTierValue === 1) {

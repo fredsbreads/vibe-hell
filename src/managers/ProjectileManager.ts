@@ -126,13 +126,13 @@ function stepPool(pool: LinearProjectile[], delta: number, arena: Arena, playerX
 function checkSlashHitsOnPool(pool: LinearProjectile[], hitbox: SlashHitbox, onHit: (x: number, y: number) => void): number {
   let freshDeflects = 0;
   for (const projectile of pool) {
-    if (!projectile.active || projectile.isMaxDeflectTier) {
+    if (!projectile.active || !projectile.canBeDeflectedBy(hitbox.swingId)) {
       continue;
     }
     if (isWithinSlashArc(projectile, hitbox)) {
       const wasHostile = !projectile.deflected;
       onHit(projectile.x, projectile.y);
-      projectile.deflect(hitbox.angle);
+      projectile.deflect(hitbox.angle, hitbox.swingId);
       if (wasHostile) {
         freshDeflects++;
       }
