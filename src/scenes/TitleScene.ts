@@ -8,9 +8,11 @@ const START_WAVE_REGISTRY_KEY = "startWave";
 /** How far the left stick must tilt to count as an Up/Down/Left/Right navigation press. */
 const STICK_THRESHOLD = 0.5;
 
-const PLAY_FOCUS_COLOR = "#ffe98a";
-const PLAY_UNFOCUSED_COLOR = "#ffffff";
-const FOCUS_COLOR = "#ffffff";
+// Single shared convention across every row/button on this screen (and the
+// pause/game-over menus - see MenuOverlay): teal when unselected, yellow when
+// selected. Previously PLAY and the wave stepper each had their own
+// inconsistent colors (including plain white for "selected" in places).
+const FOCUS_COLOR = "#ffe98a";
 const UNFOCUSED_COLOR = "#59f2c8";
 
 type FocusRow = 0 | 1;
@@ -84,7 +86,7 @@ export class TitleScene extends Phaser.Scene {
       .text(width / 2, height / 2 + 60, "PLAY", {
         fontFamily: "monospace",
         fontSize: "28px",
-        color: PLAY_UNFOCUSED_COLOR,
+        color: UNFOCUSED_COLOR,
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
@@ -171,8 +173,8 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
-    minusButton.on("pointerover", () => minusButton.setColor("#ffffff"));
-    minusButton.on("pointerout", () => minusButton.setColor("#59f2c8"));
+    minusButton.on("pointerover", () => minusButton.setColor(FOCUS_COLOR));
+    minusButton.on("pointerout", () => minusButton.setColor(UNFOCUSED_COLOR));
     minusButton.on("pointerdown", () => {
       this.setFocusedRow(WAVE_ROW);
       this.adjustStartWave(-1);
@@ -196,8 +198,8 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
-    plusButton.on("pointerover", () => plusButton.setColor("#ffffff"));
-    plusButton.on("pointerout", () => plusButton.setColor("#59f2c8"));
+    plusButton.on("pointerover", () => plusButton.setColor(FOCUS_COLOR));
+    plusButton.on("pointerout", () => plusButton.setColor(UNFOCUSED_COLOR));
     plusButton.on("pointerdown", () => {
       this.setFocusedRow(WAVE_ROW);
       this.adjustStartWave(1);
@@ -225,7 +227,7 @@ export class TitleScene extends Phaser.Scene {
 
   /** Colors whichever row is currently focused, and the other row its normal color - mirrors the pause menu's highlight convention. */
   private refreshFocusHighlight(): void {
-    this.playButton.setColor(this.focusedRow === PLAY_ROW ? PLAY_FOCUS_COLOR : PLAY_UNFOCUSED_COLOR);
+    this.playButton.setColor(this.focusedRow === PLAY_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
     this.startWaveText.setColor(this.focusedRow === WAVE_ROW ? FOCUS_COLOR : UNFOCUSED_COLOR);
   }
 
