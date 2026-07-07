@@ -17,6 +17,13 @@ const TEXT_DEPTH = 21;
 // focus away from a deliberate D-pad/stick navigation. Buttons are 44px apart,
 // so genuine mouse movement toward a different one clears this easily.
 const MOUSE_MOVE_THRESHOLD = 24;
+// How long after a menu opens to ignore mouse-hover focus-stealing entirely.
+// A menu can appear mid-motion (dying or pausing while actively sweeping the
+// mouse to aim), and that residual motion continuing for a frame or two
+// afterward easily clears MOUSE_MOVE_THRESHOLD on its own - long enough to
+// let that settle, short enough that deliberately moving the mouse to a
+// button still feels instant.
+const HOVER_GRACE_MS = 300;
 
 /**
  * A reusable full-screen dimmed overlay with a title, optional subtitle, and
@@ -41,6 +48,7 @@ export class MenuOverlay {
   private focusedIndex = 0;
   private prevPointerX: number | null = null;
   private prevPointerY: number | null = null;
+  private hoverGraceRemainingMs = 0;
 
   constructor(scene: Phaser.Scene, width: number, height: number) {
     this.scene = scene;
@@ -84,6 +92,7 @@ export class MenuOverlay {
     // just moved" on the very first update() and steal focus off button 0.
     this.prevPointerX = null;
     this.prevPointerY = null;
+    this.hoverGraceRemainingMs = HOVER_GRACE_MS;
 
     const startY = this.subtitleText.y + (subtitle.length > 0 ? 50 : 30);
     buttons.forEach((button, i) => {
@@ -127,14 +136,23 @@ export class MenuOverlay {
    * it. Hovering only steals focus if the mouse actually moved this frame -
    * otherwise a cursor merely resting over some button (left over from
    * whatever click opened this menu) would fight keyboard/gamepad navigation
-   * by re-claiming focus back onto itself every single frame.
+   * by re-claiming focus back onto itself every single frame. Also entirely
+   * suppressed for HOVER_GRACE_MS right after the menu opens - a menu can
+   * appear mid-motion (dying or pausing while actively sweeping the mouse to
+   * aim), and that residual motion continuing for a frame or two afterward
+   * easily clears MOUSE_MOVE_THRESHOLD on its own, stealing focus off the
+   * intended default option before the player had any chance to react.
    */
-  update(): void {
+  update(delta: number): void {
     if (this.buttonTexts.length === 0) {
       return;
     }
+    if (this.hoverGraceRemainingMs > 0) {
+      this.hoverGraceRemainingMs -= delta;
+    }
     const pointer = this.scene.input.activePointer;
     const mouseMoved =
+      this.hoverGraceRemainingMs <= 0 &&
       this.prevPointerX !== null &&
       this.prevPointerY !== null &&
       (Math.abs(pointer.x - this.prevPointerX) > MOUSE_MOVE_THRESHOLD ||
