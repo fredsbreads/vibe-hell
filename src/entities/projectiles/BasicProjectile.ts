@@ -28,17 +28,21 @@ export class BasicProjectile extends LinearProjectile {
    * still hostile) lived past its 10s cap, and should be despawned. The 10s
    * cap only applies before deflection - once deflected, its original
    * lifetime countdown (which keeps ticking in the background regardless) no
-   * longer applies, so despawning is driven solely by the 3-bounce cap
-   * instead of potentially cutting a late-life deflect short.
+   * longer applies, so despawning is driven solely by the bounce cap instead
+   * of potentially cutting a late-life deflect short. A 3rd-tier deflect
+   * stops bouncing entirely (see deflectTier gating below) so it bursts
+   * straight through the wall and escapes instead of bouncing again.
    */
   step(delta: number, arena: Arena, _playerX: number, _playerY: number): boolean {
     if (!this.move(delta, arena)) {
       return false;
     }
 
-    this.bounceOffWall(arena);
-    if (this.hasUsedAllDeflectedBounces()) {
-      return true;
+    if (this.deflectTier < 3) {
+      this.bounceOffWall(arena);
+      if (this.hasUsedAllDeflectedBounces()) {
+        return true;
+      }
     }
 
     if (this.deflected) {

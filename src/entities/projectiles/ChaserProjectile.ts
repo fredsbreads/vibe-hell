@@ -33,14 +33,17 @@ export class ChaserProjectile extends LinearProjectile {
     }
 
     if (this.deflected) {
-      this.bounceOffWall(arena);
-      if (this.hasUsedAllDeflectedBounces()) {
-        return true;
+      if (this.deflectTier < 3) {
+        this.bounceOffWall(arena);
+        if (this.hasUsedAllDeflectedBounces()) {
+          return true;
+        }
       }
       // Its original 10s lifetime cap (still ticking in the background from
       // before deflection) no longer applies once deflected - despawning is
-      // driven solely by the bounce cap, not by however much time happened
-      // to be left when the Slash connected.
+      // driven solely by the bounce cap (or, at tier 3, by bursting straight
+      // out through the wall), not by however much time happened to be left
+      // when the Slash connected.
       return this.hasEscaped(arena);
     }
 

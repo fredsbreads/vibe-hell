@@ -8,10 +8,21 @@ const ESCAPE_MARGIN = 80;
 const SPAWN_TELEGRAPH_MS = 400;
 const TELEGRAPH_START_ALPHA = 0.35;
 
-/** How many times a deflected projectile can bounce off the arena wall before despawning. */
-const DEFLECT_MAX_BOUNCES = 3;
-/** Solid fill color for deflected projectiles - matches the player/Dash color, so "this is now friendly" reads as one identity regardless of original type. */
-const DEFLECT_TINT = 0x59f2c8;
+/** How many wall bounces the 1st deflect grants; each subsequent deflect (up to MAX_DEFLECT_TIER) adds this many more to the total cap. */
+const DEFLECT_BASE_BOUNCE_CAP = 3;
+/** Highest deflect tier a projectile can reach - the 3rd deflect bursts it straight out of the arena instead of granting more bounces. */
+const MAX_DEFLECT_TIER = 3;
+/** Each deflect beyond the 1st multiplies the projectile's current speed by this, compounding - tier 3 is this squared relative to tier 1. */
+const DEFLECT_SPEED_MULTIPLIER = 1.5;
+/**
+ * Solid fill color per deflect tier - escalates from the calm "friendly"
+ * teal (matches the player/Dash color) toward a hotter, brighter tone as the
+ * projectile gets closer to bursting out on its 3rd deflect. Index 0 is
+ * unused (only tiers 1-3 are ever deflected).
+ */
+const DEFLECT_TINTS: readonly number[] = [0x000000, 0x59f2c8, 0xa0fbe6, 0xffffff];
+/** Visual-only scale bump per tier, so a higher-tier projectile reads as "more charged up" at a glance - purely cosmetic, doesn't affect the collision radius. */
+const DEFLECT_SCALES: readonly number[] = [1, 1, 1.15, 1.3];
 
 /**
  * Shared base for pooled projectiles that aim at the player once on spawn
@@ -28,8 +39,12 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
   protected telegraphRemainingMs = 0;
   /** World angle (from the arena center) this projectile spawned at - used to keep it riding the perimeter while telegraphing, even as the arena rotates underneath it. */
   private perimeterAngle = 0;
-  private isDeflected = false;
+  /** 0 = still hostile. 1-3 = how many times it's been deflected; see deflect(). */
+  private deflectTierValue = 0;
   private deflectedBounceCount = 0;
+  private deflectBounceCap = DEFLECT_BASE_BOUNCE_CAP;
+  /** The speed deflected movement uses, compounding each additional deflect - starts from the projectile's own base speed on the 1st deflect. */
+  private deflectSpeed = 0;
 
   private readonly maxLifetimeMs: number;
   private lifetimeRemainingMs: number;
@@ -59,9 +74,11 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     this.vy = Math.sin(angle) * this.speed;
     this.telegraphRemainingMs = SPAWN_TELEGRAPH_MS;
     this.lifetimeRemainingMs = this.maxLifetimeMs;
-    this.isDeflected = false;
+    this.deflectTierValue = 0;
     this.deflectedBounceCount = 0;
+    this.deflectBounceCap = DEFLECT_BASE_BOUNCE_CAP;
     this.clearTint();
+    this.setScale(1);
     this.setAlpha(TELEGRAPH_START_ALPHA);
     this.setActive(true);
     this.setVisible(true);
@@ -72,26 +89,56 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     this.setVisible(false);
   }
 
+  /** True once this has been deflected at least once (tier 1-3) - friendly from here on, regardless of tier. */
   get deflected(): boolean {
-    return this.isDeflected;
+    return this.deflectTierValue > 0;
+  }
+
+  get deflectTier(): number {
+    return this.deflectTierValue;
+  }
+
+  /** True once a projectile has reached its 3rd deflect and can't be deflected again. */
+  get isMaxDeflectTier(): boolean {
+    return this.deflectTierValue >= MAX_DEFLECT_TIER;
   }
 
   /**
-   * Converts an active hostile projectile into a friendly deflected one:
-   * fired off in the player's aim direction at its own original speed
-   * (unchanged), recolored to a shared "friendly" tint regardless of what it
-   * originally was. Deflected projectiles behave uniformly from here on -
-   * a plain mirror bounce off the wall (see bounceOffWall), capped at
-   * DEFLECT_MAX_BOUNCES - rather than retaining their original type's quirks
-   * (e.g. Chaser's re-aim-on-bounce), and destroy any hostile projectile
-   * they touch for as long as they're alive (see ProjectileManager).
+   * Converts an active hostile projectile into a friendly deflected one (1st
+   * deflect), or escalates an already-deflected one to its next tier (2nd/3rd
+   * deflect) - fired off in the player's current aim direction each time.
+   * Tier 1 behaves as the original deflect always has: own base speed, a
+   * plain mirror bounce off the wall (see bounceOffWall) capped at
+   * DEFLECT_BASE_BOUNCE_CAP bounces, rather than retaining its original
+   * type's quirks (e.g. Chaser's re-aim-on-bounce). Tier 2 grants
+   * DEFLECT_BASE_BOUNCE_CAP more bounces on top of however many it has left
+   * and multiplies its speed. Tier 3 multiplies speed again but stops
+   * bouncing entirely - see the bounceOffWall-gating in each subclass's
+   * step() - so it bursts straight through the wall and escapes instead.
+   * Recolored/rescaled per tier (cosmetic only; the collision radius never
+   * changes) so a charged-up projectile reads as more dangerous at a glance.
+   * Destroys any hostile projectile it touches for as long as it's alive,
+   * at every tier (see ProjectileManager).
    */
   deflect(aimAngle: number): void {
-    this.isDeflected = true;
-    this.deflectedBounceCount = 0;
-    this.vx = Math.cos(aimAngle) * this.speed;
-    this.vy = Math.sin(aimAngle) * this.speed;
-    this.setTintFill(DEFLECT_TINT);
+    if (this.isMaxDeflectTier) {
+      return;
+    }
+    this.deflectTierValue += 1;
+
+    if (this.deflectTierValue === 1) {
+      this.deflectSpeed = this.speed;
+    } else {
+      if (this.deflectTierValue === 2) {
+        this.deflectBounceCap += DEFLECT_BASE_BOUNCE_CAP;
+      }
+      this.deflectSpeed *= DEFLECT_SPEED_MULTIPLIER;
+    }
+
+    this.vx = Math.cos(aimAngle) * this.deflectSpeed;
+    this.vy = Math.sin(aimAngle) * this.deflectSpeed;
+    this.setTintFill(DEFLECT_TINTS[this.deflectTierValue]);
+    this.setScale(DEFLECT_SCALES[this.deflectTierValue]);
   }
 
   /**
@@ -135,8 +182,10 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
    * the true wall normal - a flat edge's normal for polygon arenas, radial
    * for a circle), same math Basic already used for its predictable bounce.
    * Shared so deflected projectiles of any original type bounce identically
-   * - counting toward their DEFLECT_MAX_BOUNCES cap - rather than each type
-   * keeping its own original quirks (e.g. Chaser's re-aim) once deflected.
+   * - counting toward their deflectBounceCap - rather than each type keeping
+   * its own original quirks (e.g. Chaser's re-aim) once deflected. Callers
+   * skip calling this at all once a projectile reaches deflect tier 3, so it
+   * flies straight through the wall unclamped instead of bouncing.
    */
   protected bounceOffWall(arena: Arena): void {
     const dx = this.x - arena.bounds.centerX;
@@ -161,14 +210,14 @@ export abstract class LinearProjectile extends Phaser.GameObjects.Image {
     this.vx -= 2 * dot * n.x;
     this.vy -= 2 * dot * n.y;
 
-    if (this.isDeflected) {
+    if (this.deflectTierValue > 0) {
       this.deflectedBounceCount++;
     }
   }
 
-  /** True once a deflected projectile has used up all its wall bounces and should despawn. Always false for a still-hostile projectile (no bounce cap). */
+  /** True once a deflected projectile has used up all its wall bounces and should despawn. Always false for a still-hostile projectile (no bounce cap) or a tier-3 one (no bounce cap applies - it bursts out instead). */
   protected hasUsedAllDeflectedBounces(): boolean {
-    return this.isDeflected && this.deflectedBounceCount >= DEFLECT_MAX_BOUNCES;
+    return this.deflectTierValue > 0 && this.deflectedBounceCount >= this.deflectBounceCap;
   }
 
   /**

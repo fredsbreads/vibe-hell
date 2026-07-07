@@ -9,7 +9,7 @@ import {
 patchPhaserGamepadPluginSparseArrayBug();
 patchPhaserGamepadPluginStalePadReferenceBug();
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "game",
   width: 800,
@@ -30,3 +30,6 @@ new Phaser.Game({
   },
   scene: [TitleScene, MainScene],
 });
+
+// TEMP debug-only, for verifying the tiered-deflect experiment. Remove before merging.
+(window as unknown as { __game: Phaser.Game }).__game = game;

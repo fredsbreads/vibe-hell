@@ -114,20 +114,31 @@ function stepPool(pool: LinearProjectile[], delta: number, arena: Arena, playerX
   }
 }
 
-/** Deflects (rather than deactivates) any hostile projectile the slash connects with - already-deflected ones are skipped, so a friendly projectile can't be re-processed by its own owner's next swing. */
+/**
+ * Deflects (rather than deactivates) any hostile projectile the slash
+ * connects with - or, if it's already deflected, escalates it to its next
+ * tier (up to 3), so re-slashing your own friendly projectiles is how you
+ * charge them up. A projectile already at tier 3 is skipped (nothing more to
+ * gain). Only counts toward the returned score for a fresh hostile-to-
+ * friendly deflect - tiering up a projectile you already own isn't a new
+ * threat neutralized, so it doesn't score again.
+ */
 function checkSlashHitsOnPool(pool: LinearProjectile[], hitbox: SlashHitbox, onHit: (x: number, y: number) => void): number {
-  let hits = 0;
+  let freshDeflects = 0;
   for (const projectile of pool) {
-    if (!projectile.active || projectile.deflected) {
+    if (!projectile.active || projectile.isMaxDeflectTier) {
       continue;
     }
     if (isWithinSlashArc(projectile, hitbox)) {
+      const wasHostile = !projectile.deflected;
       onHit(projectile.x, projectile.y);
       projectile.deflect(hitbox.angle);
-      hits++;
+      if (wasHostile) {
+        freshDeflects++;
+      }
     }
   }
-  return hits;
+  return freshDeflects;
 }
 
 /** Deflected projectiles are friendly - they never damage the player, and contact with them doesn't consume them (only running out of bounces, or hitting a hostile, does). */
@@ -451,7 +462,7 @@ export class ProjectileManager {
     return checkDeflectedKills([this.basicPool, this.zoomerPool, this.chaserPool], onDeflectedKill);
   }
 
-  /** Deflects any Basic/Zoomer/Chaser projectile inside the slash hitbox - fired back out in the player's aim direction, friendly from here on. Stop Waves are immune to Slash. Returns how many were hit. */
+  /** Deflects (or tiers up) any Basic/Zoomer/Chaser projectile inside the slash hitbox - fired back out in the player's aim direction, friendly from here on. Stop Waves are immune to Slash. Returns how many were freshly deflected this frame (tier-ups don't count). */
   checkSlashHits(hitbox: SlashHitbox | null): number {
     if (!hitbox) {
       return 0;
