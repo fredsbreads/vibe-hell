@@ -1,6 +1,6 @@
 import Phaser from "phaser";
-import { TitleScene } from "./scenes/TitleScene";
-import { MainScene } from "./scenes/MainScene";
+import { TimeTitleScene } from "./scenes/TimeTitleScene";
+import { TimeMainScene } from "./scenes/TimeMainScene";
 import {
   patchPhaserGamepadPluginSparseArrayBug,
   patchPhaserGamepadPluginStalePadReferenceBug,
@@ -28,5 +28,5 @@ new Phaser.Game({
   input: {
     gamepad: true,
   },
-  scene: [TitleScene, MainScene],
+  scene: [TimeTitleScene, TimeMainScene],
 });
