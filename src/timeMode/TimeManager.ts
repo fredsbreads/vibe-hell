@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { Arena } from "../arena/Arena";
 import { Enemy } from "./Enemy";
-import { TimeProjectile } from "./TimeProjectile";
+import { TimeProjectile, ProjectileKind } from "./TimeProjectile";
 import { SlashHitbox } from "./TimePlayer";
 import { spawnPop } from "../effects/spawnPop";
 
@@ -13,10 +13,12 @@ const ENEMY_MIN_SPAWN_DIST_FROM_PLAYER = 140;
 const MAX_SPAWN_ATTEMPTS = 20;
 
 const PROJECTILE_POOL_SIZE = 60;
-const PROJECTILE_SPEED = 200;
 const PROJECTILE_RADIUS = 7;
-/** Exported so the scene can generate the matching texture with this same color - single source of truth. */
+/** Base color for the shared projectile texture - every projectile is tinted per-kind on activate anyway (see TimeProjectile), so this only needs to be a valid opaque placeholder. */
 export const PROJECTILE_COLOR = 0xf2e85c;
+
+/** Every kind an enemy can fire, picked with equal odds per shot (see fireProjectile). */
+const PROJECTILE_KINDS: ProjectileKind[] = ["straight", "zoomer", "chaser", "ricochet"];
 
 const KILL_POP_COLOR = 0xffe98a;
 const DEFLECT_POP_COLOR = 0x59f2c8;
@@ -47,7 +49,7 @@ export class TimeManager {
       this.enemyPool.push(new Enemy(scene));
     }
     for (let i = 0; i < PROJECTILE_POOL_SIZE; i++) {
-      this.projectilePool.push(new TimeProjectile(scene, "time-projectile", PROJECTILE_SPEED, PROJECTILE_RADIUS, PROJECTILE_COLOR));
+      this.projectilePool.push(new TimeProjectile(scene, "time-projectile", PROJECTILE_RADIUS));
     }
   }
 
@@ -81,7 +83,7 @@ export class TimeManager {
       if (!projectile.active) {
         continue;
       }
-      if (projectile.step(realDelta, worldScaledDelta, this.arena)) {
+      if (projectile.step(realDelta, worldScaledDelta, this.arena, playerX, playerY)) {
         projectile.deactivate();
       }
     }
@@ -138,7 +140,8 @@ export class TimeManager {
 
   private fireProjectile(x: number, y: number, angle: number): void {
     const projectile = this.projectilePool.find((p) => !p.active);
-    projectile?.activate(x, y, angle);
+    const kind = PROJECTILE_KINDS[Math.floor(Math.random() * PROJECTILE_KINDS.length)];
+    projectile?.activate(x, y, angle, kind);
   }
 
   private trySpawnEnemy(worldScaledDelta: number, playerX: number, playerY: number): void {
