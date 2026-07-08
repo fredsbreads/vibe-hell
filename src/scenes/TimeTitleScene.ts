@@ -19,7 +19,7 @@ export class TimeTitleScene extends Phaser.Scene {
     this.prevCrossHeld = isPadButtonDown(pad, DualSenseMap.CROSS);
 
     this.add
-      .text(width / 2, height / 2 - 80, "TIME DILATION", {
+      .text(width / 2, height / 2 - 80, "VIBE HELL", {
         fontFamily: "monospace",
         fontSize: "48px",
         color: "#59f2c8",
@@ -36,23 +36,6 @@ export class TimeTitleScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
 
     this.playButton.on("pointerdown", () => this.startGame());
-
-    this.add
-      .text(width / 2, height / 2 + 90, "Enter / Click / Cross to start", {
-        fontFamily: "monospace",
-        fontSize: "14px",
-        color: "#6a6a80",
-      })
-      .setOrigin(0.5);
-
-    this.add
-      .text(width / 2, height / 2 + 140, "Stand still and the world nearly freezes.\nMove and it speeds back up.", {
-        fontFamily: "monospace",
-        fontSize: "13px",
-        color: "#8a8aa0",
-        align: "center",
-      })
-      .setOrigin(0.5);
 
     this.input.keyboard!.once("keydown-ENTER", () => this.startGame());
     this.input.keyboard!.once("keydown-SPACE", () => this.startGame());

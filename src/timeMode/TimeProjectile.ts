@@ -25,9 +25,18 @@ const DEFLECT_BURST_MS = 300;
  * gradient. Deliberately long/opaque - this needs to read clearly even when
  * the world (and so the projectile itself) is moving at a near-frozen
  * timescale, where a plain fading-afterimage trail was too subtle to notice.
+ *
+ * Each segment is drawn using the heading the projectile actually had that
+ * far back along its path (see headingHistory), not just its current
+ * velocity - so a curving chaser (or a ricochet that just re-aimed off a
+ * bounce) shows a visibly bent tail instead of a straight line extrapolated
+ * from its current direction. Sampled by distance traveled rather than by
+ * frame, so the tail always represents the same ~TAIL_LENGTH of actual path
+ * regardless of framerate or how dilated the world currently is.
  */
 const TAIL_LENGTH = 46;
-const TAIL_SEGMENTS = 5;
+const TAIL_SEGMENTS = 8;
+const TAIL_SEGMENT_LENGTH = TAIL_LENGTH / TAIL_SEGMENTS;
 const TAIL_MAX_ALPHA = 0.85;
 
 /**
@@ -80,6 +89,10 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private deflectedBounceCount = 0;
   private deflectBurstRemainingMs = 0;
 
+  /** Recent velocity headings (radians), oldest first, sampled every TAIL_SEGMENT_LENGTH of travel - see the TAIL_LENGTH doc comment above. */
+  private readonly headingHistory: number[] = [];
+  private distanceSinceLastSample = 0;
+
   constructor(scene: Phaser.Scene, textureKey: string, radius: number) {
     super(scene, 0, 0, textureKey);
     this.radius = radius;
@@ -100,6 +113,9 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.isDeflected = false;
     this.deflectedBounceCount = 0;
     this.deflectBurstRemainingMs = 0;
+    this.headingHistory.length = 0;
+    this.headingHistory.push(aimAngle);
+    this.distanceSinceLastSample = 0;
     this.setTintFill(this.baseColor);
     this.setAlpha(1);
     this.setActive(true);
@@ -150,10 +166,12 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
       this.turnTowardPlayer(playerX, playerY, dt);
     }
 
+    const moveDist = Math.hypot(this.vx, this.vy) * dt;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 
     this.bounceOffWall(arena, playerX, playerY);
+    this.sampleHeading(moveDist);
     this.redrawTail();
 
     if (this.isDeflected && this.deflectedBounceCount >= DEFLECT_MAX_BOUNCES) {
@@ -174,6 +192,18 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     const newAngle = Phaser.Math.Angle.RotateTo(currentAngle, targetAngle, CHASER_TURN_RATE * dt);
     this.vx = Math.cos(newAngle) * speed;
     this.vy = Math.sin(newAngle) * speed;
+  }
+
+  /** Records the current heading once enough path distance has accumulated since the last sample - see the TAIL_LENGTH doc comment. Can push more than one sample in a single call (e.g. a big deflect-burst jump). */
+  private sampleHeading(moveDist: number): void {
+    this.distanceSinceLastSample += moveDist;
+    while (this.distanceSinceLastSample >= TAIL_SEGMENT_LENGTH) {
+      this.headingHistory.push(Math.atan2(this.vy, this.vx));
+      if (this.headingHistory.length > TAIL_SEGMENTS) {
+        this.headingHistory.shift();
+      }
+      this.distanceSinceLastSample -= TAIL_SEGMENT_LENGTH;
+    }
   }
 
   private hasEscaped(arena: Arena): boolean {
@@ -221,14 +251,17 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   }
 
   /**
-   * Draws a tapered line from the projectile back toward where it came from
-   * (opposite its current velocity), redrawn fresh every step so it always
-   * points the right way even after a bounce or a deflect. A handful of
-   * progressively shorter/fainter segments fake a taper, since Graphics
-   * strokes don't support a real gradient - reads far more clearly as "this
-   * is moving in direction X" than a handful of sparse fading afterimages
-   * did, which matters a lot when the projectile itself might be crawling
-   * along at a near-frozen world timescale.
+   * Draws a tapered line from the projectile back toward where it came from,
+   * redrawn fresh every step. Walks backward one fixed-length segment at a
+   * time, using progressively older recorded headings (see headingHistory)
+   * for each segment rather than a single current-velocity direction for the
+   * whole tail - so it visibly bends along a curving path (chaser, or a
+   * ricochet just past a bounce) instead of always reading as a straight
+   * line. A handful of progressively shorter/fainter segments fake a taper,
+   * since Graphics strokes don't support a real gradient - reads far more
+   * clearly as "this is moving in direction X" than a plain fading
+   * afterimage trail did, which matters a lot when the projectile itself
+   * might be crawling along at a near-frozen world timescale.
    */
   private redrawTail(): void {
     this.tailGraphic.clear();
@@ -236,17 +269,21 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     if (speed === 0) {
       return;
     }
-    const dirX = this.vx / speed;
-    const dirY = this.vy / speed;
     const color = this.isDeflected ? DEFLECT_TINT : this.baseColor;
 
+    let cursorX = this.x;
+    let cursorY = this.y;
     for (let i = 0; i < TAIL_SEGMENTS; i++) {
-      const segStart = (i / TAIL_SEGMENTS) * TAIL_LENGTH;
-      const segEnd = ((i + 1) / TAIL_SEGMENTS) * TAIL_LENGTH;
+      const historyIndex = Math.max(0, this.headingHistory.length - 1 - i);
+      const angle = this.headingHistory[historyIndex];
+      const nextX = cursorX - Math.cos(angle) * TAIL_SEGMENT_LENGTH;
+      const nextY = cursorY - Math.sin(angle) * TAIL_SEGMENT_LENGTH;
       const alpha = TAIL_MAX_ALPHA * (1 - i / TAIL_SEGMENTS);
       const width = this.radius * (1 - i / TAIL_SEGMENTS) * 0.9;
       this.tailGraphic.lineStyle(Math.max(1, width), color, alpha);
-      this.tailGraphic.lineBetween(this.x - dirX * segStart, this.y - dirY * segStart, this.x - dirX * segEnd, this.y - dirY * segEnd);
+      this.tailGraphic.lineBetween(cursorX, cursorY, nextX, nextY);
+      cursorX = nextX;
+      cursorY = nextY;
     }
   }
 }
