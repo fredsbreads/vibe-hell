@@ -60,9 +60,9 @@ export const CHASER_TURN_RATE = 2.5;
 /** Speed and color per kind - color doubles as the tail's color, so each kind reads as visually distinct at a glance. Exported as the single source of truth for anything else that wants to reuse the same look (e.g. the title screen background). */
 export const KIND_CONFIG: Record<ProjectileKind, { speed: number; color: number }> = {
   straight: { speed: BASE_SPEED, color: 0xf2e85c },
-  zoomer: { speed: BASE_SPEED * 2, color: 0xff6b35 },
+  zoomer: { speed: BASE_SPEED * 2, color: 0xff3b3b },
   chaser: { speed: BASE_SPEED, color: 0xc86bff },
-  ricochet: { speed: BASE_SPEED, color: 0x00e5ff },
+  ricochet: { speed: BASE_SPEED, color: 0xff6b35 },
 };
 
 /**
