@@ -5,13 +5,12 @@ const FIRE_INTERVAL_MS = 1400;
 const AIM_IMPERFECTION_RAD = 0.35;
 
 /**
- * How long before firing the wind-up telegraph starts (world-time-scaled,
- * like the rest of the cooldown) - the aim angle (imperfection included) is
- * locked in the moment this begins, not re-rolled each frame, so the
- * telegraph line stays stable/accurate rather than jittering right up to
- * the shot.
+ * How long before firing the wind-up telegraph (glow + scale) starts
+ * (world-time-scaled, like the rest of the cooldown) - the aim angle
+ * (imperfection included) is locked in the moment this begins, not
+ * re-rolled each frame.
  */
-const TELEGRAPH_DURATION_MS = 500;
+const TELEGRAPH_DURATION_MS = 250;
 
 const BASE_COLOR = 0xff6b4a;
 const CHARGED_COLOR = 0xffe98a;
@@ -66,23 +65,6 @@ export class Enemy extends Phaser.GameObjects.Image {
     return this.alive;
   }
 
-  get isTelegraphing(): boolean {
-    return this.telegraphActive;
-  }
-
-  /** The locked-in angle this enemy is about to fire at - only meaningful while isTelegraphing is true. */
-  get telegraphAngle(): number {
-    return this.telegraphAngleValue;
-  }
-
-  /** 0 (telegraph just started) to 1 (about to fire) - drives the wind-up visual intensity. */
-  get telegraphProgress(): number {
-    if (!this.telegraphActive) {
-      return 0;
-    }
-    return 1 - Math.max(0, this.fireCooldownRemainingMs) / TELEGRAPH_DURATION_MS;
-  }
-
   /**
    * Advances the fire cooldown by the caller's world-scaled delta, and the
    * wind-up visual (tint/scale pulsing toward CHARGED_COLOR) once telegraphing
@@ -100,7 +82,7 @@ export class Enemy extends Phaser.GameObjects.Image {
     }
 
     if (this.telegraphActive) {
-      const progress = this.telegraphProgress;
+      const progress = 1 - Math.max(0, this.fireCooldownRemainingMs) / TELEGRAPH_DURATION_MS;
       this.setTintFill(Phaser.Display.Color.Interpolate.ColorWithColor(
         Phaser.Display.Color.ValueToColor(BASE_COLOR),
         Phaser.Display.Color.ValueToColor(CHARGED_COLOR),

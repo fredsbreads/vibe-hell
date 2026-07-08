@@ -22,18 +22,6 @@ const DEFLECT_POP_COLOR = 0x59f2c8;
 const HIT_POP_COLOR = 0xff3b3b;
 
 /**
- * Telegraph aim line, shown for each enemy currently winding up a shot -
- * reveals the actual angle it's about to fire at (imperfection included),
- * not just "something's coming". Kept as its own clearly separable block
- * (one field, one draw call) since this is the half of the telegraph most
- * likely to get cut after playtesting, per the design discussion - the
- * wind-up glow/scale on the enemy itself (see Enemy.ts) is expected to stay
- * either way.
- */
-const TELEGRAPH_LINE_LENGTH = 50;
-const TELEGRAPH_LINE_COLOR = 0xffe98a;
-
-/**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
  * interaction between them: Slash deflects a hostile projectile or kills an
  * enemy outright (one hit, either way); a deflected/friendly projectile
@@ -48,7 +36,6 @@ const TELEGRAPH_LINE_COLOR = 0xffe98a;
 export class TimeManager {
   private readonly enemyPool: Enemy[] = [];
   private readonly projectilePool: TimeProjectile[] = [];
-  private readonly telegraphGraphic: Phaser.GameObjects.Graphics;
   private enemySpawnTimerMs = ENEMY_SPAWN_INTERVAL_MS;
 
   constructor(
@@ -61,7 +48,6 @@ export class TimeManager {
     for (let i = 0; i < PROJECTILE_POOL_SIZE; i++) {
       this.projectilePool.push(new TimeProjectile(scene, "time-projectile", PROJECTILE_SPEED, PROJECTILE_RADIUS, PROJECTILE_COLOR));
     }
-    this.telegraphGraphic = scene.add.graphics();
   }
 
   get enemiesAlive(): number {
@@ -72,7 +58,6 @@ export class TimeManager {
   update(realDelta: number, worldScaledDelta: number, playerX: number, playerY: number): number {
     this.trySpawnEnemy(worldScaledDelta, playerX, playerY);
 
-    this.telegraphGraphic.clear();
     for (const enemy of this.enemyPool) {
       if (!enemy.isAlive) {
         continue;
@@ -81,8 +66,6 @@ export class TimeManager {
       const fireAngle = enemy.step(worldScaledDelta, playerX, playerY);
       if (fireAngle !== null) {
         this.fireProjectile(enemy.x, enemy.y, fireAngle);
-      } else if (enemy.isTelegraphing) {
-        this.drawTelegraphLine(enemy);
       }
     }
 
@@ -96,14 +79,6 @@ export class TimeManager {
     }
 
     return this.checkDeflectedKills();
-  }
-
-  /** The telegraph aim line - see the const doc comment above for why this is kept as one easily-removable block. */
-  private drawTelegraphLine(enemy: Enemy): void {
-    const tipX = enemy.x + Math.cos(enemy.telegraphAngle) * TELEGRAPH_LINE_LENGTH;
-    const tipY = enemy.y + Math.sin(enemy.telegraphAngle) * TELEGRAPH_LINE_LENGTH;
-    this.telegraphGraphic.lineStyle(2, TELEGRAPH_LINE_COLOR, 0.3 + enemy.telegraphProgress * 0.6);
-    this.telegraphGraphic.lineBetween(enemy.x, enemy.y, tipX, tipY);
   }
 
   /** Deflects a hostile projectile in range, or kills an enemy in range outright (one hit). Returns how many enemies were killed this way (scores the same as a deflected-projectile kill). */
