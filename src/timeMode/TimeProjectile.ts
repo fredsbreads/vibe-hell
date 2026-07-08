@@ -54,11 +54,11 @@ const TAIL_MAX_ALPHA = 0.85;
 export type ProjectileKind = "straight" | "zoomer" | "chaser" | "ricochet";
 
 const BASE_SPEED = 200;
-/** How fast (rad/s, world-time-scaled) a chaser can turn its velocity toward the player. Capped rather than instant so it stays dodgeable. */
-const CHASER_TURN_RATE = 2.5;
+/** How fast (rad/s, world-time-scaled) a chaser can turn its velocity toward the player. Capped rather than instant so it stays dodgeable. Exported so decorative reuses (e.g. the title screen background) can match the real in-game turn feel. */
+export const CHASER_TURN_RATE = 2.5;
 
-/** Speed and color per kind - color doubles as the tail's color, so each kind reads as visually distinct at a glance. */
-const KIND_CONFIG: Record<ProjectileKind, { speed: number; color: number }> = {
+/** Speed and color per kind - color doubles as the tail's color, so each kind reads as visually distinct at a glance. Exported as the single source of truth for anything else that wants to reuse the same look (e.g. the title screen background). */
+export const KIND_CONFIG: Record<ProjectileKind, { speed: number; color: number }> = {
   straight: { speed: BASE_SPEED, color: 0xf2e85c },
   zoomer: { speed: BASE_SPEED * 2, color: 0xff6b35 },
   chaser: { speed: BASE_SPEED, color: 0xc86bff },
