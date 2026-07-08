@@ -19,6 +19,9 @@ const SLASH_DURATION_MS = 120;
 const SLASH_COOLDOWN_MS = 500;
 const SLASH_RANGE = 60;
 const SLASH_ARC_WIDTH = 0.9;
+const SLASH_COLOR = 0xf2e85c;
+/** How far (0-1) into the swing the flash-white tint finishes fading to SLASH_COLOR - just the first slice of the swing reads as a flash. */
+const SLASH_FLASH_PORTION = 0.25;
 
 export interface SlashHitbox {
   x: number;
@@ -251,9 +254,25 @@ export class TimePlayer {
     }
   }
 
+  /**
+   * The arc starts bright/thick (a flash) and tapers down to the settled
+   * thin yellow line over the swing's active duration - reads as a moment
+   * of impact rather than a static line that just appears and disappears.
+   */
   private redrawSlashArc(): void {
     this.slashGraphic.clear();
-    this.slashGraphic.lineStyle(4, 0xf2e85c, 1);
+    const progress = 1 - this.slashActiveRemainingMs / SLASH_DURATION_MS;
+    const width = Phaser.Math.Linear(10, 4, progress);
+    const alpha = Phaser.Math.Linear(1, 0.5, progress);
+    const flashProgress = Math.min(1, progress / SLASH_FLASH_PORTION);
+    const color = Phaser.Display.Color.Interpolate.ColorWithColor(
+      Phaser.Display.Color.ValueToColor(0xffffff),
+      Phaser.Display.Color.ValueToColor(SLASH_COLOR),
+      100,
+      flashProgress * 100,
+    ).color;
+
+    this.slashGraphic.lineStyle(width, color, alpha);
     this.slashGraphic.beginPath();
     this.slashGraphic.arc(this.position.x, this.position.y, SLASH_RANGE, this.slashAngle - SLASH_ARC_WIDTH / 2, this.slashAngle + SLASH_ARC_WIDTH / 2);
     this.slashGraphic.strokePath();

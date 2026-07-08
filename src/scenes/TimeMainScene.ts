@@ -15,6 +15,14 @@ const ARENA_ROTATION_RAD_PER_MS = (Math.PI * 2) / 30000;
 const RESTART_HOLD_DURATION_MS = 500;
 const MENU_STICK_THRESHOLD = 0.5;
 
+/** Brief freeze-frame on a kill - real time itself pauses for this long (see the early-return in update()), not just world-scaled time. Short enough to read as impact rather than lag. */
+const KILL_HIT_STOP_MS = 70;
+const KILL_SHAKE_DURATION_MS = 90;
+const KILL_SHAKE_INTENSITY = 0.004;
+const DEATH_SHAKE_DURATION_MS = 220;
+const DEATH_SHAKE_INTENSITY = 0.012;
+const DEATH_FLASH_DURATION_MS = 200;
+
 /**
  * The time-dilation mode's main scene: endless survival, 1 HP, no wave
  * timer - the run just goes until you take a single hit. A single rotating
@@ -50,6 +58,8 @@ export class TimeMainScene extends Phaser.Scene {
   private restartHoldMs = 0;
   private restartHoldText!: Phaser.GameObjects.Text;
 
+  private hitStopRemainingMs = 0;
+
   constructor() {
     super("TimeMainScene");
   }
@@ -60,6 +70,7 @@ export class TimeMainScene extends Phaser.Scene {
     this.enemiesDefeated = 0;
     this.uiState = "playing";
     this.restartHoldMs = 0;
+    this.hitStopRemainingMs = 0;
 
     const arenaBounds: ArenaBounds = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
     this.arena = new Arena(arenaBounds, new PolygonArena(arenaBounds, 6, ARENA_ROTATION_RAD_PER_MS));
@@ -136,6 +147,14 @@ export class TimeMainScene extends Phaser.Scene {
       return;
     }
 
+    if (this.hitStopRemainingMs > 0) {
+      // A brief total freeze on a kill - real time itself pauses (not just
+      // world-scaled time), so this decrements by the raw delta and skips
+      // every other update this frame, menu polling excepted (handled above).
+      this.hitStopRemainingMs = Math.max(0, this.hitStopRemainingMs - delta);
+      return;
+    }
+
     this.player.update(delta);
     const worldTimescale = this.player.worldTimescale;
     const worldScaledDelta = delta * worldTimescale;
@@ -144,7 +163,12 @@ export class TimeMainScene extends Phaser.Scene {
 
     const deflectedKills = this.timeManager.update(delta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
     const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
-    this.enemiesDefeated += deflectedKills + slashKills;
+    const killsThisFrame = deflectedKills + slashKills;
+    this.enemiesDefeated += killsThisFrame;
+    if (killsThisFrame > 0) {
+      this.hitStopRemainingMs = KILL_HIT_STOP_MS;
+      this.cameras.main.shake(KILL_SHAKE_DURATION_MS, KILL_SHAKE_INTENSITY);
+    }
 
     if (!this.player.isInvincible && this.timeManager.checkPlayerHit(this.player.sprite.x, this.player.sprite.y, TimePlayer.RADIUS)) {
       this.player.takeDamage();
@@ -269,6 +293,8 @@ export class TimeMainScene extends Phaser.Scene {
   private enterGameOver(): void {
     this.uiState = "gameOver";
     this.physics.pause();
+    this.cameras.main.shake(DEATH_SHAKE_DURATION_MS, DEATH_SHAKE_INTENSITY);
+    this.cameras.main.flash(DEATH_FLASH_DURATION_MS, 255, 59, 59);
     this.resyncMenuNavHeldState();
     this.menuOverlay.show("GAME OVER", `Enemies Defeated: ${this.enemiesDefeated}`, [
       { label: "RESTART", onSelect: () => this.restartRun() },
