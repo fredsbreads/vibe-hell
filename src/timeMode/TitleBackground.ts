@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { ProjectileKind, KIND_CONFIG, CHASER_TURN_RATE } from "./TimeProjectile";
 
-const PARTICLE_COUNT = 36;
+const PARTICLE_COUNT = 60;
 const KINDS: ProjectileKind[] = ["straight", "zoomer", "chaser", "ricochet"];
 const RADIUS = 6;
 
