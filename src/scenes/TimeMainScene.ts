@@ -78,6 +78,7 @@ export class TimeMainScene extends Phaser.Scene {
     // the new run begins.
     this.player.resyncInputState();
     this.timeManager = new TimeManager(this, this.arena);
+    this.timeManager.spawnInitialEnemies(this.player.sprite.x, this.player.sprite.y);
 
     this.statusText = this.add.text(12, 12, "", {
       fontFamily: "monospace",

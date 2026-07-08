@@ -6,7 +6,8 @@ import { SlashHitbox } from "./TimePlayer";
 import { spawnPop } from "../effects/spawnPop";
 
 const ENEMY_POOL_SIZE = 20;
-const ENEMY_SPAWN_INTERVAL_MS = 3000;
+const ENEMY_SPAWN_INTERVAL_MS = 1500;
+const INITIAL_ENEMY_COUNT = 3;
 /** Rejection-sample radius around the player - keeps a freshly-spawned enemy from appearing right on top of you. */
 const ENEMY_MIN_SPAWN_DIST_FROM_PLAYER = 140;
 const MAX_SPAWN_ATTEMPTS = 20;
@@ -52,6 +53,13 @@ export class TimeManager {
 
   get enemiesAlive(): number {
     return this.enemyPool.filter((e) => e.isAlive).length;
+  }
+
+  /** Spawns the run's starting enemies immediately, same placement rules as a normal timed spawn. */
+  spawnInitialEnemies(playerX: number, playerY: number): void {
+    for (let i = 0; i < INITIAL_ENEMY_COUNT; i++) {
+      this.spawnOneEnemy(playerX, playerY);
+    }
   }
 
   /** Advances everything by one frame. realDelta drives the deflect burst window; worldScaledDelta drives every other movement/timer. Returns how many hostile projectiles/enemies a deflected projectile destroyed by contact this frame (scores the same as a direct Slash kill). */
@@ -139,7 +147,11 @@ export class TimeManager {
       return;
     }
     this.enemySpawnTimerMs = ENEMY_SPAWN_INTERVAL_MS;
+    this.spawnOneEnemy(playerX, playerY);
+  }
 
+  /** Activates one free enemy at a random point in the arena, rejection-sampled to stay at least ENEMY_MIN_SPAWN_DIST_FROM_PLAYER away. No-op if the pool is full or no valid spot is found within MAX_SPAWN_ATTEMPTS. */
+  private spawnOneEnemy(playerX: number, playerY: number): void {
     const enemy = this.enemyPool.find((e) => !e.isAlive);
     if (!enemy) {
       return;
