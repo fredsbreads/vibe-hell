@@ -2,7 +2,11 @@ import Phaser from "phaser";
 import { DualSenseMap, getPadButtonValue, isPadButtonDown } from "./DualSenseMap";
 import { getAimMode } from "../config/settings";
 
-const STICK_DEADZONE = 0.2;
+// Lower than a typical default (some games use ~0.2) specifically so slow,
+// deliberate stick movements register - this mode's world-timescale is
+// driven directly by stick tilt, so a large deadzone doubled as a coarse
+// "nothing, then suddenly 20%+ speed" jump the instant you crossed it.
+const STICK_DEADZONE = 0.06;
 const TRIGGER_THRESHOLD = 0.5;
 // Minimum screen-pixel movement between frames to count as "the mouse was just
 // used", so a stationary cursor never fights an idle-but-connected gamepad.
@@ -36,8 +40,20 @@ export interface InputState {
   slashPressed: boolean;
 }
 
+/**
+ * Below the deadzone, 0. Above it, rescaled so the output still spans the
+ * full 0-1 range starting right at the deadzone edge, rather than jumping
+ * straight from 0 to `deadzone` the instant the stick crosses the
+ * threshold - that jump was the actual "nothing, then suddenly 20%+ speed"
+ * problem, not just the deadzone being too wide.
+ */
 function applyDeadzone(value: number, deadzone: number): number {
-  return Math.abs(value) < deadzone ? 0 : value;
+  const magnitude = Math.abs(value);
+  if (magnitude < deadzone) {
+    return 0;
+  }
+  const rescaled = (magnitude - deadzone) / (1 - deadzone);
+  return Math.sign(value) * rescaled;
 }
 
 /**

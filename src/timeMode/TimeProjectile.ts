@@ -6,6 +6,8 @@ const ESCAPE_MARGIN = 80;
 /** How many times a deflected projectile can bounce off the wall before despawning - same cap the original game's deflect used. */
 const DEFLECT_MAX_BOUNCES = 3;
 const DEFLECT_TINT = 0x59f2c8;
+/** Deflected projectiles fly faster than the hostile speed they arrived at, on top of the real-time burst - reads as more dangerous/decisive, and outruns the enemy that fired it in the first place. */
+const DEFLECT_SPEED_MULTIPLIER = 1.6;
 
 /**
  * How long, in real (undilated) ms, a just-deflected projectile keeps moving
@@ -16,10 +18,17 @@ const DEFLECT_TINT = 0x59f2c8;
  */
 const DEFLECT_BURST_MS = 90;
 
-/** Minimum real-ms gap between trail ghosts, so a slow (near-frozen) projectile doesn't spawn an unreadable pile of overlapping copies in one spot. */
-const TRAIL_INTERVAL_MS = 45;
-const TRAIL_ALPHA = 0.35;
-const TRAIL_FADE_MS = 220;
+/**
+ * Length (px) of the directional tail drawn behind the projectile, pointing
+ * back the way it came. Drawn as several progressively shorter/fainter
+ * segments to fake a taper, since Graphics strokes don't support a real
+ * gradient. Deliberately long/opaque - this needs to read clearly even when
+ * the world (and so the projectile itself) is moving at a near-frozen
+ * timescale, where a plain fading-afterimage trail was too subtle to notice.
+ */
+const TAIL_LENGTH = 46;
+const TAIL_SEGMENTS = 5;
+const TAIL_MAX_ALPHA = 0.85;
 
 /**
  * A pooled bullet for the time-dilation mode. Aims at the player once at
@@ -34,18 +43,21 @@ const TRAIL_FADE_MS = 220;
 export class TimeProjectile extends Phaser.GameObjects.Image {
   readonly radius: number;
   private readonly speed: number;
+  private readonly baseColor: number;
+  private readonly tailGraphic: Phaser.GameObjects.Graphics;
 
   private vx = 0;
   private vy = 0;
   private isDeflected = false;
   private deflectedBounceCount = 0;
   private deflectBurstRemainingMs = 0;
-  private trailTimerMs = 0;
 
-  constructor(scene: Phaser.Scene, textureKey: string, speed: number, radius: number) {
+  constructor(scene: Phaser.Scene, textureKey: string, speed: number, radius: number, baseColor: number) {
     super(scene, 0, 0, textureKey);
     this.speed = speed;
     this.radius = radius;
+    this.baseColor = baseColor;
+    this.tailGraphic = scene.add.graphics();
     scene.add.existing(this);
     this.setActive(false);
     this.setVisible(false);
@@ -58,29 +70,31 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.isDeflected = false;
     this.deflectedBounceCount = 0;
     this.deflectBurstRemainingMs = 0;
-    this.trailTimerMs = 0;
     this.clearTint();
     this.setAlpha(1);
     this.setActive(true);
     this.setVisible(true);
+    this.tailGraphic.setVisible(true);
   }
 
   deactivate(): void {
     this.setActive(false);
     this.setVisible(false);
+    this.tailGraphic.setVisible(false);
   }
 
   get deflected(): boolean {
     return this.isDeflected;
   }
 
-  /** Redirects along the player's aim angle at this projectile's own speed, unchanged - friendly from here on, with a brief real-time burst before it starts being world-time-scaled. */
+  /** Redirects along the player's aim angle at a boosted speed (see DEFLECT_SPEED_MULTIPLIER) - friendly from here on, with a brief real-time burst before it starts being world-time-scaled. */
   deflect(aimAngle: number): void {
     this.isDeflected = true;
     this.deflectedBounceCount = 0;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
-    this.vx = Math.cos(aimAngle) * this.speed;
-    this.vy = Math.sin(aimAngle) * this.speed;
+    const deflectSpeed = this.speed * DEFLECT_SPEED_MULTIPLIER;
+    this.vx = Math.cos(aimAngle) * deflectSpeed;
+    this.vy = Math.sin(aimAngle) * deflectSpeed;
     this.setTintFill(DEFLECT_TINT);
   }
 
@@ -99,13 +113,13 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
       this.deflectBurstRemainingMs = Math.max(0, this.deflectBurstRemainingMs - realDelta);
     }
 
-    this.spawnTrailIfDue(effectiveDelta);
-
     const dt = effectiveDelta / 1000;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 
     this.bounceOffWall(arena);
+    this.redrawTail();
+
     if (this.isDeflected && this.deflectedBounceCount >= DEFLECT_MAX_BOUNCES) {
       return true;
     }
@@ -149,25 +163,33 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     }
   }
 
-  /** Fading afterimages so a projectile crawling along at a near-frozen timescale still reads as clearly moving/directional, not just sitting still. */
-  private spawnTrailIfDue(effectiveDelta: number): void {
-    this.trailTimerMs += effectiveDelta;
-    if (this.trailTimerMs < TRAIL_INTERVAL_MS) {
+  /**
+   * Draws a tapered line from the projectile back toward where it came from
+   * (opposite its current velocity), redrawn fresh every step so it always
+   * points the right way even after a bounce or a deflect. A handful of
+   * progressively shorter/fainter segments fake a taper, since Graphics
+   * strokes don't support a real gradient - reads far more clearly as "this
+   * is moving in direction X" than a handful of sparse fading afterimages
+   * did, which matters a lot when the projectile itself might be crawling
+   * along at a near-frozen world timescale.
+   */
+  private redrawTail(): void {
+    this.tailGraphic.clear();
+    const speed = Math.hypot(this.vx, this.vy);
+    if (speed === 0) {
       return;
     }
-    this.trailTimerMs = 0;
+    const dirX = this.vx / speed;
+    const dirY = this.vy / speed;
+    const color = this.isDeflected ? DEFLECT_TINT : this.baseColor;
 
-    const ghost = this.scene.add.image(this.x, this.y, this.texture.key);
-    if (this.isDeflected) {
-      ghost.setTintFill(DEFLECT_TINT);
+    for (let i = 0; i < TAIL_SEGMENTS; i++) {
+      const segStart = (i / TAIL_SEGMENTS) * TAIL_LENGTH;
+      const segEnd = ((i + 1) / TAIL_SEGMENTS) * TAIL_LENGTH;
+      const alpha = TAIL_MAX_ALPHA * (1 - i / TAIL_SEGMENTS);
+      const width = this.radius * (1 - i / TAIL_SEGMENTS) * 0.9;
+      this.tailGraphic.lineStyle(Math.max(1, width), color, alpha);
+      this.tailGraphic.lineBetween(this.x - dirX * segStart, this.y - dirY * segStart, this.x - dirX * segEnd, this.y - dirY * segEnd);
     }
-    ghost.setAlpha(TRAIL_ALPHA);
-    ghost.setScale(this.scaleX, this.scaleY);
-    this.scene.tweens.add({
-      targets: ghost,
-      alpha: 0,
-      duration: TRAIL_FADE_MS,
-      onComplete: () => ghost.destroy(),
-    });
   }
 }

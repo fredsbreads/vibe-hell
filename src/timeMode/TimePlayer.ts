@@ -69,7 +69,7 @@ export class TimePlayer {
   private worldTimescaleValue = 1;
 
   constructor(
-    scene: Phaser.Scene,
+    private readonly scene: Phaser.Scene,
     x: number,
     y: number,
     private readonly arena: Arena,
@@ -87,6 +87,17 @@ export class TimePlayer {
   /** The world timescale computed from this frame's raw stick input - read this AFTER calling update(), and use it to step everything else ("the world") this same frame. */
   get worldTimescale(): number {
     return this.worldTimescaleValue;
+  }
+
+  /**
+   * Re-syncs input edge-detection to whatever's currently held - call this
+   * right after leaving a paused state (or right after constructing a fresh
+   * TimePlayer on restart), so a button still held from confirming a menu
+   * (Cross/Enter doubles as both "confirm" and Dash) doesn't fire that
+   * in-game action the instant control returns to gameplay.
+   */
+  resyncInputState(): void {
+    this.input.resyncHeldState(this.position.x, this.position.y);
   }
 
   update(realDelta: number): void {
@@ -127,6 +138,16 @@ export class TimePlayer {
 
   get isDead(): boolean {
     return this.dead;
+  }
+
+  /** Seconds of Dash lockout remaining (world-time-scaled), 0 if ready. */
+  get dashCooldownRemainingSec(): number {
+    return this.dashLockoutRemainingMs / 1000;
+  }
+
+  /** Seconds of Slash cooldown remaining (world-time-scaled), 0 if ready. */
+  get slashCooldownRemainingSec(): number {
+    return this.slashCooldownRemainingMs / 1000;
   }
 
   get isInvincible(): boolean {
@@ -176,18 +197,34 @@ export class TimePlayer {
     this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
     this.sprite.setVelocity(dashVelocity.x, dashVelocity.y);
     this.sprite.setTint(DASH_TINT);
+    this.spawnDashGhost();
   }
 
   private updateDash(realDelta: number): void {
     if (!this.isDashing) {
       return;
     }
+    this.spawnDashGhost();
     this.dashTimeRemainingMs -= realDelta;
     if (this.dashTimeRemainingMs <= 0) {
       this.isDashing = false;
       this.dashIframeTailRemainingMs = DASH_IFRAME_TAIL_MS;
       this.sprite.clearTint();
     }
+  }
+
+  /** A fading afterimage left behind during a dash, so the burst reads as motion rather than a teleport. */
+  private spawnDashGhost(): void {
+    const ghost = this.scene.add.image(this.sprite.x, this.sprite.y, "time-player");
+    ghost.setTint(DASH_TINT);
+    ghost.setAlpha(0.5);
+    this.scene.tweens.add({
+      targets: ghost,
+      alpha: 0,
+      scale: 0.7,
+      duration: 220,
+      onComplete: () => ghost.destroy(),
+    });
   }
 
   private startSlash(angle: number): void {

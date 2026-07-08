@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TimePlayer } from "../timeMode/TimePlayer";
-import { TimeManager } from "../timeMode/TimeManager";
+import { TimeManager, PROJECTILE_COLOR } from "../timeMode/TimeManager";
 import { ArenaBounds, ARENA_RADIUS } from "../config/arena";
 import { Arena } from "../arena/Arena";
 import { PolygonArena } from "../arena/PolygonArena";
@@ -66,11 +66,17 @@ export class TimeMainScene extends Phaser.Scene {
 
     this.generateCircleTexture("time-player", TimePlayer.RADIUS, 0x59f2c8);
     this.generateCircleTexture("time-enemy", 14, 0xff6b4a);
-    this.generateCircleTexture("time-projectile", 7, 0xf2e85c);
+    this.generateCircleTexture("time-projectile", 7, PROJECTILE_COLOR);
 
     this.arenaOutlineGraphic = this.add.graphics();
 
     this.player = new TimePlayer(this, arenaBounds.centerX, arenaBounds.centerY, this.arena);
+    // A restart can happen while Cross (or Triangle) is still physically held
+    // down from confirming Restart in the menu - without this, the brand new
+    // TimePlayer's dash edge-detection would start blind (assume nothing was
+    // held) and misread that still-held button as a fresh dash the instant
+    // the new run begins.
+    this.player.resyncInputState();
     this.timeManager = new TimeManager(this, this.arena);
 
     this.statusText = this.add.text(12, 12, "", {
@@ -145,8 +151,11 @@ export class TimeMainScene extends Phaser.Scene {
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.enemiesDefeated}`);
     this.timescaleText.setText(`world: ${Math.round(worldTimescale * 100)}%`);
-    const dashLabel = "DASH READY"; // simplified for v1 - the underlying cooldown still works, just not surfaced with exact ms here
-    this.statusText.setText(`${dashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
+    const dashLabel =
+      this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
+    const slashLabel =
+      this.player.slashCooldownRemainingSec > 0 ? `SLASH: ${this.player.slashCooldownRemainingSec.toFixed(1)}s` : "SLASH: READY";
+    this.statusText.setText(`${dashLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
     this.redrawArenaOutline();
 
     if (this.player.isDead) {
@@ -250,6 +259,10 @@ export class TimeMainScene extends Phaser.Scene {
     this.physics.resume();
     this.menuOverlay.hide();
     this.menuHintText.setVisible(false);
+    // Whatever button confirmed "Resume" (Cross/Enter) may still be physically
+    // held for a frame or two - resync so TimePlayer doesn't mistake that
+    // same still-held button for a fresh dash press the instant play resumes.
+    this.player.resyncInputState();
   }
 
   private enterGameOver(): void {

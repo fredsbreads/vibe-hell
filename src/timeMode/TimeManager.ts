@@ -14,6 +14,8 @@ const MAX_SPAWN_ATTEMPTS = 20;
 const PROJECTILE_POOL_SIZE = 60;
 const PROJECTILE_SPEED = 200;
 const PROJECTILE_RADIUS = 7;
+/** Exported so the scene can generate the matching texture with this same color - single source of truth. */
+export const PROJECTILE_COLOR = 0xf2e85c;
 
 const KILL_POP_COLOR = 0xffe98a;
 const DEFLECT_POP_COLOR = 0x59f2c8;
@@ -44,7 +46,7 @@ export class TimeManager {
       this.enemyPool.push(new Enemy(scene));
     }
     for (let i = 0; i < PROJECTILE_POOL_SIZE; i++) {
-      this.projectilePool.push(new TimeProjectile(scene, "time-projectile", PROJECTILE_SPEED, PROJECTILE_RADIUS));
+      this.projectilePool.push(new TimeProjectile(scene, "time-projectile", PROJECTILE_SPEED, PROJECTILE_RADIUS, PROJECTILE_COLOR));
     }
   }
 
@@ -60,6 +62,7 @@ export class TimeManager {
       if (!enemy.isAlive) {
         continue;
       }
+      this.clampEnemyToArena(enemy);
       const fireAngle = enemy.step(worldScaledDelta, playerX, playerY);
       if (fireAngle !== null) {
         this.fireProjectile(enemy.x, enemy.y, fireAngle);
@@ -156,6 +159,31 @@ export class TimeManager {
     }
   }
 
+  /**
+   * Enemies don't move on their own yet, but the arena's boundary does - it
+   * rotates continuously, and a polygon's distance-to-wall varies by angle
+   * (an edge midpoint sits closer to center than a vertex does). A position
+   * that was safely inside at spawn time can end up outside as that varying
+   * boundary sweeps past underneath a stationary enemy, clipping it through
+   * the wall. Re-clamping every frame against the CURRENT (rotated)
+   * boundary keeps it visually pinned just inside the wall instead.
+   */
+  private clampEnemyToArena(enemy: Enemy): void {
+    const dx = enemy.x - this.arena.bounds.centerX;
+    const dy = enemy.y - this.arena.bounds.centerY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= 0) {
+      return;
+    }
+    const angle = Math.atan2(dy, dx);
+    const maxDist = this.arena.maxRadiusAtAngle(angle) - Enemy.RADIUS;
+    if (dist > maxDist) {
+      const scale = maxDist / dist;
+      enemy.x = this.arena.bounds.centerX + dx * scale;
+      enemy.y = this.arena.bounds.centerY + dy * scale;
+    }
+  }
+
   /** A deflected/friendly projectile destroys any hostile projectile OR enemy it touches, for as long as it's alive. Returns how many kills happened this frame. */
   private checkDeflectedKills(): number {
     let kills = 0;
@@ -187,6 +215,12 @@ export class TimeManager {
           spawnPop(this.scene, enemy.x, enemy.y, KILL_POP_COLOR);
           enemy.deactivate();
           kills++;
+          // Unlike chaining through hostile projectiles (which a friendly
+          // projectile keeps living to potentially do more of), landing the
+          // kill on an actual enemy ends its own journey too - a bigger,
+          // more final hit than just clearing another bullet out of the air.
+          deflected.deactivate();
+          break;
         }
       }
     }
