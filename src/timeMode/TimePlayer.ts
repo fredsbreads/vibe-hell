@@ -120,8 +120,13 @@ export class TimePlayer {
 
     if (!this.isDashing) {
       const move = new Phaser.Math.Vector2(state.moveX, state.moveY);
-      if (move.lengthSq() > 0) {
-        move.normalize().scale(MOVE_SPEED);
+      // Speed scales with how far the stick is tilted (post-deadzone), not just
+      // whether it's tilted at all - a light push should move you slower, full
+      // tilt still hits MOVE_SPEED. Keyboard input is always -1/0/1 so this has
+      // no effect there; it only matters for analog stick input.
+      const tilt = Math.min(1, move.length());
+      if (tilt > 0) {
+        move.normalize().scale(MOVE_SPEED * tilt);
       }
       this.clipOutwardComponent(move);
       this.sprite.setVelocity(move.x, move.y);

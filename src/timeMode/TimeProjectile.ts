@@ -16,7 +16,7 @@ const DEFLECT_SPEED_MULTIPLIER = 1.6;
  * nearly frozen would make it look like it barely moved at all - the burst
  * sells "that connected" regardless of the current timescale.
  */
-const DEFLECT_BURST_MS = 90;
+const DEFLECT_BURST_MS = 300;
 
 /**
  * Length (px) of the directional tail drawn behind the projectile, pointing
