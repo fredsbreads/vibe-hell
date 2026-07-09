@@ -40,6 +40,12 @@ export interface InputState {
   slashPressed: boolean;
 }
 
+/** Anything that can hand back a frame's worth of input on demand - PlayerInput itself (live device input) and RecordedInputSource (replaying a finished run) both satisfy this, so TimePlayer doesn't need to know which one it's actually driven by. resyncHeldState is optional - only a live PlayerInput needs it (see its own doc comment); a RecordedInputSource has no "physically held button" concept to resync. */
+export interface InputSource {
+  read(playerX: number, playerY: number): InputState;
+  resyncHeldState?(playerX: number, playerY: number): void;
+}
+
 /**
  * Below the deadzone, 0. Above it, rescaled so the output still spans the
  * full 0-1 range starting right at the deadzone edge, rather than jumping
@@ -63,7 +69,7 @@ function applyDeadzone(value: number, deadzone: number): number {
  * aliases) so the game is playable and testable in this environment without
  * physical controller hardware attached to the browser.
  */
-export class PlayerInput {
+export class PlayerInput implements InputSource {
   private readonly scene: Phaser.Scene;
   private readonly keys: Record<"up" | "down" | "left" | "right" | "dash" | "slash", Phaser.Input.Keyboard.Key>;
   private prevDashHeld = false;

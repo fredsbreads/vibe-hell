@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { PlayerInput } from "../input/PlayerInput";
+import { PlayerInput, InputSource, InputState } from "../input/PlayerInput";
 import { Arena } from "../arena/Arena";
 import { computeWorldTimescale } from "./worldClock";
 import { getShowSlashRangeIndicator } from "../config/settings";
@@ -72,7 +72,8 @@ export class TimePlayer {
 
   aimAngle = -Math.PI / 2;
 
-  private readonly input: PlayerInput;
+  private input: InputSource;
+  private lastInputStateValue: InputState | null = null;
   private readonly aimIndicator: Phaser.GameObjects.Graphics;
   private readonly slashGraphic: Phaser.GameObjects.Graphics;
   private readonly slashRangeGraphic: Phaser.GameObjects.Graphics;
@@ -95,8 +96,9 @@ export class TimePlayer {
     x: number,
     y: number,
     private readonly arena: Arena,
+    inputSource?: InputSource,
   ) {
-    this.input = new PlayerInput(scene);
+    this.input = inputSource ?? new PlayerInput(scene);
 
     this.sprite = scene.physics.add.sprite(x, y, "time-player");
     this.sprite.setCircle(TimePlayer.RADIUS);
@@ -112,21 +114,47 @@ export class TimePlayer {
     return this.worldTimescaleValue;
   }
 
+  /** Whatever InputState update() last read - null before the first update() call. Recorded frame-by-frame during live play to build a replayable run (see ReplayRecorder); not meaningful during replay itself, since that's driven by a RecordedInputSource reading its own already-recorded frames back. */
+  get lastInputState(): InputState | null {
+    return this.lastInputStateValue;
+  }
+
+  /**
+   * Swaps the input source post-construction - used to switch from live
+   * device input to a RecordedInputSource the moment a run ends, so the
+   * death replay can drive the exact same player-update code with recorded
+   * input instead of a second parallel implementation.
+   */
+  setInputSource(source: InputSource): void {
+    this.input = source;
+  }
+
   /**
    * Re-syncs input edge-detection to whatever's currently held - call this
    * right after leaving a paused state (or right after constructing a fresh
    * TimePlayer on restart), so a button still held from confirming a menu
    * (Cross/Enter doubles as both "confirm" and Dash) doesn't fire that
-   * in-game action the instant control returns to gameplay.
+   * in-game action the instant control returns to gameplay. No-op (and
+   * harmless) when the current input source doesn't support it, e.g. a
+   * RecordedInputSource during replay.
    */
   resyncInputState(): void {
-    this.input.resyncHeldState(this.position.x, this.position.y);
+    this.input.resyncHeldState?.(this.position.x, this.position.y);
   }
 
-  update(realDelta: number): void {
+  /**
+   * @param forcedWorldTimescale If given, used directly instead of deriving
+   * the world timescale from this frame's movement input - the death
+   * replay forces a fast constant pace (see TimeMainScene) so the world
+   * plays out lively regardless of how dilated it actually was live, while
+   * the player's own recorded movement still replays through this exact
+   * same code path.
+   */
+  update(realDelta: number, forcedWorldTimescale?: number): void {
     const state = this.input.read(this.position.x, this.position.y);
+    this.lastInputStateValue = state;
     this.aimAngle = state.aimAngle;
-    this.worldTimescaleValue = computeWorldTimescale(state.moveX, state.moveY);
+    this.worldTimescaleValue = forcedWorldTimescale ?? computeWorldTimescale(state.moveX, state.moveY);
     const worldScaledDelta = realDelta * this.worldTimescaleValue;
 
     this.tickCooldowns(realDelta, worldScaledDelta);
@@ -167,6 +195,37 @@ export class TimePlayer {
 
   get isDead(): boolean {
     return this.dead;
+  }
+
+  /**
+   * Restarts this same TimePlayer instance in place at (x, y) - used to
+   * loop the death replay without recreating the sprite/graphics objects
+   * each pass. Clears every piece of run-scoped state (dash/slash
+   * cooldowns, dead flag, tint, velocity, aim) back to a fresh run's
+   * starting values; does NOT touch the input source - the caller sets
+   * that once when entering replay and it stays a RecordedInputSource
+   * across every loop, just rewound.
+   */
+  reset(x: number, y: number): void {
+    this.sprite.setPosition(x, y);
+    (this.sprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+    this.sprite.clearTint();
+
+    this.isDashing = false;
+    this.dashTimeRemainingMs = 0;
+    this.dashLockoutRemainingMs = 0;
+    this.dashIframeTailRemainingMs = 0;
+
+    this.slashAngle = 0;
+    this.slashActiveRemainingMs = 0;
+    this.slashCooldownRemainingMs = 0;
+    this.swingId = 0;
+    this.slashGraphic.clear();
+
+    this.dead = false;
+    this.worldTimescaleValue = 1;
+    this.aimAngle = -Math.PI / 2;
+    this.lastInputStateValue = null;
   }
 
   /** Seconds of Dash lockout remaining (world-time-scaled), 0 if ready. */

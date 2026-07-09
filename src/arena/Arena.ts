@@ -25,6 +25,10 @@ export class Arena {
     this.shape.update(delta);
   }
 
+  resetRotation(): void {
+    this.shape.resetRotation();
+  }
+
   maxRadiusAtAngle(worldAngle: number): number {
     return this.shape.maxRadiusAtAngle(worldAngle);
   }

@@ -20,7 +20,7 @@
  * world-time-gated cooldowns (Dash lockout, Slash cooldown) aren't
  * permanently stuck if a player never moves at all.
  */
-export const MIN_WORLD_TIMESCALE = 0.04;
+export const MIN_WORLD_TIMESCALE = 0.02;
 
 export function computeWorldTimescale(moveX: number, moveY: number): number {
   const magnitude = Math.hypot(moveX, moveY);

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { SeededRandom } from "./SeededRandom";
 
 const FIRE_INTERVAL_MS = 1400;
 /** Random angular offset applied at fire time, +/- this many radians - "potentially imperfect aim" rather than a hitscan-perfect shot every time. */
@@ -36,7 +37,10 @@ export class Enemy extends Phaser.GameObjects.Image {
   private telegraphActive = false;
   private telegraphAngleValue = 0;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(
+    scene: Phaser.Scene,
+    private readonly rng: SeededRandom,
+  ) {
     super(scene, 0, 0, "time-enemy");
     scene.add.existing(this);
     this.setActive(false);
@@ -78,7 +82,7 @@ export class Enemy extends Phaser.GameObjects.Image {
     if (!this.telegraphActive && this.fireCooldownRemainingMs <= TELEGRAPH_DURATION_MS) {
       this.telegraphActive = true;
       const trueAngle = Math.atan2(playerY - this.y, playerX - this.x);
-      this.telegraphAngleValue = trueAngle + (Math.random() * 2 - 1) * AIM_IMPERFECTION_RAD;
+      this.telegraphAngleValue = trueAngle + (this.rng.next() * 2 - 1) * AIM_IMPERFECTION_RAD;
     }
 
     if (this.telegraphActive) {

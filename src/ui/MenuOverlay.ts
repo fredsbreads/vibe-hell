@@ -5,6 +5,8 @@ export interface MenuButton {
   onSelect: () => void;
 }
 
+type Layout = "center" | "corner";
+
 const BACKDROP_DEPTH = 20;
 const TEXT_DEPTH = 21;
 // Minimum screen-pixel movement between frames to count as "the mouse was just
@@ -25,15 +27,30 @@ const MOUSE_MOVE_THRESHOLD = 24;
 // button still feels instant.
 const HOVER_GRACE_MS = 300;
 
+/** Top-left anchor for the "corner" layout - below the top HUD row (status/score/timescale text all sit at y=12). */
+const CORNER_X = 16;
+const CORNER_Y = 90;
+const CORNER_BUTTON_SPACING = 30;
+/** Padding around the corner layout's tight-fit backdrop, so it doesn't hug the text edge-to-edge. */
+const CORNER_BACKDROP_PADDING = 14;
+
 /**
- * A reusable full-screen dimmed overlay with a title, optional subtitle, and
- * a vertical stack of clickable text buttons. Shared by the pause and Game
- * Over screens rather than duplicating the same backdrop/title/button
- * construction twice.
+ * A reusable dimmed overlay with a title, optional subtitle, and a vertical
+ * stack of clickable text buttons. Shared by the pause and Game Over screens
+ * rather than duplicating the same backdrop/title/button construction twice.
+ *
+ * Supports two layouts (see show()'s layout param): "center" is the original
+ * full-screen-dimmed, screen-centered presentation (pause, options, main
+ * menu). "corner" is a small tight-fit panel in the top-left instead, sized
+ * to just its own content rather than the whole screen - for a menu that
+ * needs to stay out of the way of something still happening behind it (the
+ * death replay loops continuously behind the Game Over menu, and a
+ * full-screen dim would hide it).
  */
 export class MenuOverlay {
   private readonly scene: Phaser.Scene;
   private readonly centerX: number;
+  private readonly centerY: number;
   private readonly backdrop: Phaser.GameObjects.Rectangle;
   private readonly titleText: Phaser.GameObjects.Text;
   private readonly subtitleText: Phaser.GameObjects.Text;
@@ -53,11 +70,11 @@ export class MenuOverlay {
   constructor(scene: Phaser.Scene, width: number, height: number) {
     this.scene = scene;
     this.centerX = width / 2;
-    const centerY = height / 2;
+    this.centerY = height / 2;
 
-    this.backdrop = scene.add.rectangle(this.centerX, centerY, width, height, 0x000000, 0.65).setDepth(BACKDROP_DEPTH);
+    this.backdrop = scene.add.rectangle(this.centerX, this.centerY, width, height, 0x000000, 0.65).setDepth(BACKDROP_DEPTH);
     this.titleText = scene.add
-      .text(this.centerX, centerY - 70, "", {
+      .text(this.centerX, this.centerY - 70, "", {
         fontFamily: "monospace",
         fontSize: "32px",
         color: "#ffe98a",
@@ -66,7 +83,7 @@ export class MenuOverlay {
       .setOrigin(0.5)
       .setDepth(TEXT_DEPTH);
     this.subtitleText = scene.add
-      .text(this.centerX, centerY - 20, "", {
+      .text(this.centerX, this.centerY - 20, "", {
         fontFamily: "monospace",
         fontSize: "16px",
         color: "#e0e0f0",
@@ -78,7 +95,7 @@ export class MenuOverlay {
     this.hide();
   }
 
-  show(title: string, subtitle: string, buttons: MenuButton[]): void {
+  show(title: string, subtitle: string, buttons: MenuButton[], layout: Layout = "center"): void {
     this.destroyButtons();
 
     this.backdrop.setVisible(true);
@@ -94,6 +111,18 @@ export class MenuOverlay {
     this.prevPointerY = null;
     this.hoverGraceRemainingMs = HOVER_GRACE_MS;
 
+    if (layout === "corner") {
+      this.layoutCorner(subtitle, buttons);
+    } else {
+      this.layoutCenter(subtitle, buttons);
+    }
+  }
+
+  private layoutCenter(subtitle: string, buttons: MenuButton[]): void {
+    this.titleText.setOrigin(0.5).setFontSize(32).setPosition(this.centerX, this.centerY - 70);
+    this.subtitleText.setOrigin(0.5).setFontSize(16).setPosition(this.centerX, this.centerY - 20);
+    this.backdrop.setPosition(this.centerX, this.centerY).setSize(this.scene.scale.width, this.scene.scale.height).setFillStyle(0x000000, 0.65);
+
     const startY = this.subtitleText.y + (subtitle.length > 0 ? 50 : 30);
     buttons.forEach((button, i) => {
       const text = this.scene.add
@@ -105,11 +134,58 @@ export class MenuOverlay {
         .setOrigin(0.5)
         .setDepth(TEXT_DEPTH)
         .setInteractive({ useHandCursor: true });
-
       text.on("pointerdown", () => button.onSelect());
-
       this.buttonTexts.push(text);
     });
+  }
+
+  /** Small top-left panel sized to just its own content, so whatever's happening on the rest of the screen (the death replay) stays visible around it. */
+  private layoutCorner(subtitle: string, buttons: MenuButton[]): void {
+    this.titleText.setOrigin(0, 0.5).setFontSize(20).setPosition(CORNER_X, CORNER_Y);
+    let nextY = CORNER_Y + CORNER_BUTTON_SPACING;
+    this.subtitleText.setOrigin(0, 0.5).setFontSize(13).setPosition(CORNER_X, nextY);
+    if (subtitle.length > 0) {
+      nextY += CORNER_BUTTON_SPACING;
+    }
+
+    buttons.forEach((button, i) => {
+      const text = this.scene.add
+        .text(CORNER_X, nextY + i * CORNER_BUTTON_SPACING, button.label, {
+          fontFamily: "monospace",
+          fontSize: "16px",
+          color: "#59f2c8",
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(TEXT_DEPTH)
+        .setInteractive({ useHandCursor: true });
+      text.on("pointerdown", () => button.onSelect());
+      this.buttonTexts.push(text);
+    });
+
+    const parts: Phaser.GameObjects.Text[] = [this.titleText];
+    if (subtitle.length > 0) {
+      parts.push(this.subtitleText);
+    }
+    parts.push(...this.buttonTexts);
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const part of parts) {
+      const b = part.getBounds();
+      minX = Math.min(minX, b.left);
+      minY = Math.min(minY, b.top);
+      maxX = Math.max(maxX, b.right);
+      maxY = Math.max(maxY, b.bottom);
+    }
+    minX -= CORNER_BACKDROP_PADDING;
+    minY -= CORNER_BACKDROP_PADDING;
+    maxX += CORNER_BACKDROP_PADDING;
+    maxY += CORNER_BACKDROP_PADDING;
+    this.backdrop
+      .setPosition((minX + maxX) / 2, (minY + maxY) / 2)
+      .setSize(maxX - minX, maxY - minY)
+      .setFillStyle(0x000000, 0.6);
   }
 
   /** Moves the highlighted button by delta (wrapping), for keyboard/gamepad up-down navigation. */

@@ -4,6 +4,7 @@ import { Enemy } from "./Enemy";
 import { TimeProjectile, ProjectileKind, BASE_DEFLECT_SPEED, DEFLECT_MAX_WALL_BOUNCES } from "./TimeProjectile";
 import { SlashHitbox } from "./TimePlayer";
 import { spawnPop } from "../effects/spawnPop";
+import { SeededRandom } from "./SeededRandom";
 
 const ENEMY_POOL_SIZE = 20;
 const ENEMY_SPAWN_INTERVAL_MS = 1500;
@@ -81,17 +82,53 @@ export class TimeManager {
   private enemySpawnTimerMs = ENEMY_SPAWN_INTERVAL_MS;
   private previewPulseMs = 0;
 
+  /**
+   * Drives every random decision that actually affects a run (enemy spawn
+   * position, projectile kind, aim imperfection - see SeededRandom's own doc
+   * comment) - seeded rather than raw Math.random() so a recorded run can be
+   * replayed bit-for-bit off the same seed. reset() re-seeds it for a fresh
+   * replay loop.
+   */
+  private rng: SeededRandom;
+
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly arena: Arena,
+    seed: number,
   ) {
+    this.rng = new SeededRandom(seed);
     for (let i = 0; i < ENEMY_POOL_SIZE; i++) {
-      this.enemyPool.push(new Enemy(scene));
+      this.enemyPool.push(new Enemy(scene, this.rng));
     }
     for (let i = 0; i < PROJECTILE_POOL_SIZE; i++) {
       this.projectilePool.push(new TimeProjectile(scene, "time-projectile", PROJECTILE_RADIUS));
     }
     this.previewGraphic = scene.add.graphics();
+  }
+
+  /**
+   * Re-seeds the shared RNG and clears every enemy/projectile back to
+   * inactive, for restarting a replay loop in place without recreating any
+   * Phaser GameObjects (a fresh Enemy/TimeProjectile pool would work too,
+   * but churns textures/sprites for no benefit - the existing pooled
+   * instances just need their active state and timers cleared). Does NOT
+   * respawn initial enemies - the caller does that separately (see
+   * spawnInitialEnemies), same as a normal run's startup sequence.
+   */
+  reset(seed: number): void {
+    this.rng = new SeededRandom(seed);
+    for (const enemy of this.enemyPool) {
+      if (enemy.isAlive) {
+        enemy.deactivate();
+      }
+    }
+    for (const projectile of this.projectilePool) {
+      if (projectile.active) {
+        projectile.deactivate();
+      }
+    }
+    this.enemySpawnTimerMs = ENEMY_SPAWN_INTERVAL_MS;
+    this.previewGraphic.clear();
   }
 
   get enemiesAlive(): number {
@@ -414,7 +451,7 @@ export class TimeManager {
 
   private fireProjectile(x: number, y: number, angle: number): void {
     const projectile = this.projectilePool.find((p) => !p.active);
-    const kind = PROJECTILE_KINDS[Math.floor(Math.random() * PROJECTILE_KINDS.length)];
+    const kind = PROJECTILE_KINDS[Math.floor(this.rng.next() * PROJECTILE_KINDS.length)];
     projectile?.activate(x, y, angle, kind);
   }
 
@@ -435,9 +472,9 @@ export class TimeManager {
     }
 
     for (let attempt = 0; attempt < MAX_SPAWN_ATTEMPTS; attempt++) {
-      const angle = Math.random() * Math.PI * 2;
+      const angle = this.rng.next() * Math.PI * 2;
       const maxRadius = this.arena.maxRadiusAtAngle(angle) - Enemy.RADIUS - 10;
-      const dist = Math.random() * maxRadius;
+      const dist = this.rng.next() * maxRadius;
       const x = this.arena.bounds.centerX + Math.cos(angle) * dist;
       const y = this.arena.bounds.centerY + Math.sin(angle) * dist;
       const distFromPlayer = Math.hypot(x - playerX, y - playerY);

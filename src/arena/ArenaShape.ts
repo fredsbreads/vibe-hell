@@ -23,6 +23,11 @@ export abstract class ArenaShape {
     return this.rotationValue;
   }
 
+  /** Back to the starting orientation - used to restart a death replay loop from the exact same arena state the run itself began with. */
+  resetRotation(): void {
+    this.rotationValue = 0;
+  }
+
   update(delta: number): void {
     if (this.rotationSpeedRadPerMs !== 0) {
       this.rotationValue += this.rotationSpeedRadPerMs * delta;

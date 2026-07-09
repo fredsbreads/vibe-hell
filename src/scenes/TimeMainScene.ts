@@ -7,6 +7,8 @@ import { PolygonArena } from "../arena/PolygonArena";
 import { DualSenseMap, isPadButtonDown } from "../input/DualSenseMap";
 import { MenuOverlay } from "../ui/MenuOverlay";
 import { getShowSlashRangeIndicator, setShowSlashRangeIndicator } from "../config/settings";
+import { RecordedFrame, RecordedInputSource } from "../timeMode/ReplayRecorder";
+import { randomSeed } from "../timeMode/SeededRandom";
 
 type UiState = "playing" | "paused" | "gameOver";
 
@@ -23,6 +25,18 @@ const KILL_SHAKE_INTENSITY = 0.004;
 const DEATH_SHAKE_DURATION_MS = 220;
 const DEATH_SHAKE_INTENSITY = 0.012;
 const DEATH_FLASH_DURATION_MS = 200;
+
+/**
+ * The death replay's forced world timescale - full, undilated pace
+ * regardless of how dilated the world actually was live, so watching the
+ * run back reads as brisk normal-speed action instead of reproducing the
+ * original slow-mo (the player's own recorded movement still replays
+ * through the exact same update() path either way - see TimePlayer.update's
+ * forcedWorldTimescale param).
+ */
+const REPLAY_WORLD_TIMESCALE = 1;
+/** How many recorded frames the replay steps through per real rendered frame - a straightforward fast-forward on top of the timescale override, similar to it, so watching a whole run back doesn't take as long as playing it did. */
+const REPLAY_STEPS_PER_FRAME = 3;
 
 /**
  * The time-dilation mode's main scene: endless survival, 1 HP, no wave
@@ -63,6 +77,14 @@ export class TimeMainScene extends Phaser.Scene {
 
   private hitStopRemainingMs = 0;
 
+  /** Seeds this run's RNG (enemy spawns, projectile kinds, aim imperfection) - regenerated each create() so a fresh run is never identical to the last, but held fixed for the rest of the run (and every death-replay loop) so the recorded input stream reproduces it exactly. */
+  private runSeed = 0;
+  /** This run's input history, one entry per real frame played - see ReplayRecorder's doc comment. Replayed on loop once the run ends. */
+  private recordedFrames: RecordedFrame[] = [];
+  private replaySource: RecordedInputSource | null = null;
+  /** Score shown on the HUD while the death replay is looping - kept separate from enemiesDefeated so the frozen final score in the Game Over menu's subtitle doesn't get overwritten as the replay re-kills the same enemies each loop. */
+  private replayEnemiesDefeated = 0;
+
   constructor() {
     super("TimeMainScene");
   }
@@ -74,6 +96,10 @@ export class TimeMainScene extends Phaser.Scene {
     this.uiState = "playing";
     this.restartHoldMs = 0;
     this.hitStopRemainingMs = 0;
+    this.runSeed = randomSeed();
+    this.recordedFrames = [];
+    this.replaySource = null;
+    this.replayEnemiesDefeated = 0;
 
     const arenaBounds: ArenaBounds = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
     this.arena = new Arena(arenaBounds, new PolygonArena(arenaBounds, 6, ARENA_ROTATION_RAD_PER_MS));
@@ -91,7 +117,7 @@ export class TimeMainScene extends Phaser.Scene {
     // held) and misread that still-held button as a fresh dash the instant
     // the new run begins.
     this.player.resyncInputState();
-    this.timeManager = new TimeManager(this, this.arena);
+    this.timeManager = new TimeManager(this, this.arena, this.runSeed);
     this.timeManager.spawnInitialEnemies(this.player.sprite.x, this.player.sprite.y);
 
     this.statusText = this.add.text(12, 12, "", {
@@ -146,6 +172,11 @@ export class TimeMainScene extends Phaser.Scene {
     this.pollMenuInputs(delta);
     this.menuOverlay.update(delta);
 
+    if (this.uiState === "gameOver") {
+      this.updateReplay();
+      return;
+    }
+
     if (this.uiState !== "playing") {
       return;
     }
@@ -159,6 +190,17 @@ export class TimeMainScene extends Phaser.Scene {
     }
 
     this.player.update(delta);
+    const inputState = this.player.lastInputState;
+    if (inputState) {
+      this.recordedFrames.push({
+        moveX: inputState.moveX,
+        moveY: inputState.moveY,
+        aimAngle: inputState.aimAngle,
+        dashPressed: inputState.dashPressed,
+        slashPressed: inputState.slashPressed,
+        realDelta: delta,
+      });
+    }
     const worldTimescale = this.player.worldTimescale;
     const worldScaledDelta = delta * worldTimescale;
 
@@ -195,6 +237,67 @@ export class TimeMainScene extends Phaser.Scene {
     if (this.player.isDead) {
       this.enterGameOver();
     }
+  }
+
+  /**
+   * Drives the death replay: steps the exact same simulation code the live
+   * run used (player/arena/timeManager update, slash-hit resolution,
+   * player-hit death check), but fed by the recorded input stream instead of
+   * a live device, and at a fixed brisk pace (REPLAY_WORLD_TIMESCALE) rather
+   * than whatever the world timescale actually was live - see the constants'
+   * doc comments. Steps REPLAY_STEPS_PER_FRAME recorded frames per real
+   * render, and loops back to the start (resetForReplayLoop) the instant
+   * either the recording runs out or the player dies again, so it plays
+   * forever behind the (compact, corner-layout) Game Over menu until the
+   * player restarts or leaves.
+   */
+  private updateReplay(): void {
+    if (!this.replaySource) {
+      return;
+    }
+
+    for (let i = 0; i < REPLAY_STEPS_PER_FRAME; i++) {
+      if (this.replaySource.isExhausted || this.player.isDead) {
+        this.resetForReplayLoop();
+      }
+
+      const stepDelta = this.replaySource.nextDelta;
+      this.player.update(stepDelta, REPLAY_WORLD_TIMESCALE);
+      const worldScaledDelta = stepDelta * REPLAY_WORLD_TIMESCALE;
+      this.arena.update(worldScaledDelta);
+
+      const deflectedKills = this.timeManager.update(stepDelta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
+      if (deflectedKills > 0) {
+        this.player.resetSlashCooldown();
+      }
+      const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
+      this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), stepDelta);
+      this.replayEnemiesDefeated += deflectedKills + slashKills;
+
+      if (!this.player.isInvincible && this.timeManager.checkPlayerHit(this.player.sprite.x, this.player.sprite.y, TimePlayer.RADIUS)) {
+        this.player.takeDamage();
+      }
+    }
+
+    this.scoreText.setText(`ENEMIES DEFEATED: ${this.replayEnemiesDefeated}`);
+    this.timescaleText.setText(`world: ${Math.round(REPLAY_WORLD_TIMESCALE * 100)}%`);
+    const dashLabel =
+      this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
+    const slashLabel =
+      this.player.slashCooldownRemainingSec > 0 ? `SLASH: ${this.player.slashCooldownRemainingSec.toFixed(1)}s` : "SLASH: READY";
+    this.statusText.setText(`${dashLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
+    this.redrawArenaOutline();
+  }
+
+  /** Restarts the death replay from the top - same starting position/seed/arena orientation the live run itself began with, so each loop is bit-for-bit identical to the last. Resets the existing pooled player/timeManager/arena in place rather than reconstructing them. */
+  private resetForReplayLoop(): void {
+    const { centerX, centerY } = this.arena.bounds;
+    this.player.reset(centerX, centerY);
+    this.arena.resetRotation();
+    this.timeManager.reset(this.runSeed);
+    this.timeManager.spawnInitialEnemies(centerX, centerY);
+    this.replaySource?.rewind();
+    this.replayEnemiesDefeated = 0;
   }
 
   private pollMenuInputs(delta: number): void {
@@ -330,15 +433,29 @@ export class TimeMainScene extends Phaser.Scene {
 
   private enterGameOver(): void {
     this.uiState = "gameOver";
-    this.physics.pause();
+    // Deliberately NOT this.physics.pause() - the death replay keeps the
+    // whole simulation running (see updateReplay) so it stays visible behind
+    // the compact corner menu, unlike the full-screen Pause overlay.
     this.cameras.main.shake(DEATH_SHAKE_DURATION_MS, DEATH_SHAKE_INTENSITY);
     this.cameras.main.flash(DEATH_FLASH_DURATION_MS, 255, 59, 59);
     this.resyncMenuNavHeldState();
-    this.menuOverlay.show("GAME OVER", `Enemies Defeated: ${this.enemiesDefeated}`, [
-      { label: "RESTART", onSelect: () => this.restartRun() },
-      { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
-    ]);
-    this.menuHintText.setVisible(true);
+    this.menuOverlay.show(
+      "GAME OVER",
+      `Enemies Defeated: ${this.enemiesDefeated}`,
+      [
+        { label: "RESTART", onSelect: () => this.restartRun() },
+        { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
+      ],
+      "corner",
+    );
+    // The compact corner menu is self-explanatory (two clickable/highlightable
+    // buttons right under the title) - the full hint text is sized/positioned
+    // for the old full-screen centered menu and would clutter the small panel.
+    this.menuHintText.setVisible(false);
+
+    this.replaySource = new RecordedInputSource(this.recordedFrames);
+    this.player.setInputSource(this.replaySource);
+    this.resetForReplayLoop();
   }
 
   private restartRun(): void {
