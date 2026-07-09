@@ -122,19 +122,9 @@ export class TimePlayer {
     this.input.resyncHeldState(this.position.x, this.position.y);
   }
 
-  /**
-   * @param snapAim Aim-assist hook (see TimeManager.computeSnappedAimAngle) -
-   * given the player's position and raw aim angle, returns the angle to
-   * actually aim at (identity if omitted, e.g. in a context with no
-   * TimeManager to consult). Applied here, before the raw angle is used for
-   * anything else, so both the real swing (startSlash) and the QoL preview
-   * (getPreviewSlashHitbox, which just reads this.aimAngle) agree on the
-   * same already-snapped direction - a swing can never fly off along a
-   * slightly different angle than what the preview promised.
-   */
-  update(realDelta: number, snapAim?: (x: number, y: number, angle: number, range: number, arcWidth: number) => number): void {
+  update(realDelta: number): void {
     const state = this.input.read(this.position.x, this.position.y);
-    this.aimAngle = snapAim ? snapAim(this.position.x, this.position.y, state.aimAngle, SLASH_RANGE, SLASH_ARC_WIDTH) : state.aimAngle;
+    this.aimAngle = state.aimAngle;
     this.worldTimescaleValue = computeWorldTimescale(state.moveX, state.moveY);
     const worldScaledDelta = realDelta * this.worldTimescaleValue;
 
@@ -144,7 +134,7 @@ export class TimePlayer {
       this.startDash(state.moveX, state.moveY);
     }
     if (state.slashPressed && this.canSlash()) {
-      this.startSlash(this.aimAngle);
+      this.startSlash(state.aimAngle);
     }
 
     this.updateDash(realDelta);
