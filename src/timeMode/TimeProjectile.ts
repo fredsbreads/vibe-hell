@@ -102,6 +102,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private isDeflected = false;
   private wallBounceCount = 0;
   private deflectBurstRemainingMs = 0;
+  /** Whether this projectile has bounced off an enemy since its last deflect - see the isReDeflectable doc comment. */
+  private bouncedOffEnemySinceDeflect = false;
 
   /** Recent velocity headings (radians), oldest first, sampled every TAIL_SEGMENT_LENGTH of travel - see the TAIL_LENGTH doc comment above. */
   private readonly headingHistory: number[] = [];
@@ -127,6 +129,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.isDeflected = false;
     this.wallBounceCount = 0;
     this.deflectBurstRemainingMs = 0;
+    this.bouncedOffEnemySinceDeflect = false;
     this.headingHistory.length = 0;
     this.headingHistory.push(aimAngle);
     this.distanceSinceLastSample = 0;
@@ -147,15 +150,27 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     return this.isDeflected;
   }
 
+  /**
+   * True once an already-deflected projectile can be hit by Slash again -
+   * only once it's bounced off an enemy since its last deflect, not the
+   * instant it's redirected. Lets a friendly shot be "picked up" and re-aimed
+   * after it's caromed through a target, instead of being permanently immune
+   * to Slash the moment it first turns friendly.
+   */
+  get isReDeflectable(): boolean {
+    return this.isDeflected && this.bouncedOffEnemySinceDeflect;
+  }
+
   /** The speed this projectile would fly off at if deflected right now - exposed for the "would this get deflected" QoL preview, so it can telegraph a faster post-deflect speed (e.g. a zoomer) with a longer trajectory line. */
   get deflectSpeed(): number {
     return this.speed * DEFLECT_SPEED_MULTIPLIER;
   }
 
-  /** Redirects along the player's aim angle at a boosted speed (see DEFLECT_SPEED_MULTIPLIER) - friendly from here on, with a brief real-time burst before it starts being world-time-scaled. Also ends any chasing/ricochet behavior immediately (see step()/bounceOffWall()), regardless of its original kind. */
+  /** Redirects along the player's aim angle at a boosted speed (see DEFLECT_SPEED_MULTIPLIER) - friendly from here on, with a brief real-time burst before it starts being world-time-scaled. Also ends any chasing/ricochet behavior immediately (see step()/bounceOffWall()), regardless of its original kind. Resets isReDeflectable back to false - it has to bounce off another enemy before it can be re-deflected again. */
   deflect(aimAngle: number): void {
     this.isDeflected = true;
     this.wallBounceCount = 0;
+    this.bouncedOffEnemySinceDeflect = false;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
     const deflectSpeed = this.deflectSpeed;
     this.vx = Math.cos(aimAngle) * deflectSpeed;
@@ -171,7 +186,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
    * exactly where on the circle it hit, same as any round-body bounce would.
    * Refreshes the wall-bounce budget back to full instead of consuming it -
    * enemy bounces themselves are unlimited, and landing one buys another
-   * wall bounce. The caller (TimeManager) is responsible for actually
+   * wall bounce. Also marks the projectile as re-deflectable (see
+   * isReDeflectable) - the caller (TimeManager) is responsible for actually
    * killing the enemy this bounced off of; this only handles the
    * projectile's own redirect.
    */
@@ -190,6 +206,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
 
     if (this.isDeflected) {
       this.wallBounceCount = 0;
+      this.bouncedOffEnemySinceDeflect = true;
     }
   }
 

@@ -61,8 +61,12 @@ const SLASH_PREVIEW_BOUNCE_BONUS = 40;
  * there. A deflected projectile only survives ONE wall bounce, but bouncing
  * off an enemy refreshes that budget - so it can chain through enemies
  * indefinitely, but two wall bounces in a row without an enemy kill in
- * between ends it (see DEFLECT_MAX_WALL_BOUNCES). A still-hostile projectile
- * touching the player is instant death (touching an enemy's body is not).
+ * between ends it (see DEFLECT_MAX_WALL_BOUNCES). Bouncing off an enemy also
+ * makes the projectile re-deflectable - Slash can pick it up and re-aim it
+ * again, though only once it's bounced off something since the last
+ * deflect, not the instant it's redirected (see
+ * TimeProjectile.isReDeflectable). A still-hostile projectile touching the
+ * player is instant death (touching an enemy's body is not).
  *
  * Enemy spawning and every step of both pools runs on the caller-supplied
  * world-scaled delta - "the world" only advances while the player is
@@ -126,14 +130,17 @@ export class TimeManager {
     return this.checkDeflectedKills();
   }
 
-  /** Deflects a hostile projectile in range, or kills an enemy in range outright (one hit). Returns how many enemies were killed this way (scores the same as a deflected-projectile kill). */
+  /** Deflects a hostile projectile in range (or re-deflects an already-deflected one that's bounced off an enemy since - see TimeProjectile.isReDeflectable), or kills an enemy in range outright (one hit). Returns how many enemies were killed this way (scores the same as a deflected-projectile kill). */
   checkSlashHits(hitbox: SlashHitbox | null): number {
     if (!hitbox) {
       return 0;
     }
 
     for (const projectile of this.projectilePool) {
-      if (!projectile.active || projectile.deflected) {
+      if (!projectile.active) {
+        continue;
+      }
+      if (projectile.deflected && !projectile.isReDeflectable) {
         continue;
       }
       if (this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, hitbox)) {
@@ -192,7 +199,10 @@ export class TimeManager {
     const alpha = Phaser.Math.Linear(SLASH_PREVIEW_MIN_ALPHA, SLASH_PREVIEW_MAX_ALPHA, pulse);
 
     for (const projectile of this.projectilePool) {
-      if (!projectile.active || projectile.deflected) {
+      if (!projectile.active) {
+        continue;
+      }
+      if (projectile.deflected && !projectile.isReDeflectable) {
         continue;
       }
       if (!this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, previewHitbox)) {
