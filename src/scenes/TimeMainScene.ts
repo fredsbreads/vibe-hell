@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { TimePlayer } from "../timeMode/TimePlayer";
 import { TimeManager, PROJECTILE_COLOR } from "../timeMode/TimeManager";
-import type { Enemy } from "../timeMode/Enemy";
 import { ArenaBounds, ARENA_RADIUS } from "../config/arena";
 import { Arena } from "../arena/Arena";
 import { PolygonArena } from "../arena/PolygonArena";
@@ -158,8 +157,8 @@ export class TimeMainScene extends Phaser.Scene {
 
     this.player.update(delta, {
       snapAngle: (x, y, angle, range, arcWidth) => this.timeManager.computeSnappedAimAngle(x, y, angle, range, arcWidth),
-      findChainLock: (x, y, target, referenceAngle, range, arcWidth, preferredChain, preferredAngle) =>
-        this.timeManager.findChainLock(x, y, target, referenceAngle, range, arcWidth, preferredChain as Enemy[], preferredAngle),
+      findChainLock: (x, y, target, referenceAngle, range, arcWidth) =>
+        this.timeManager.findChainLock(x, y, target, referenceAngle, range, arcWidth),
     });
     const worldTimescale = this.player.worldTimescale;
     const worldScaledDelta = delta * worldTimescale;
