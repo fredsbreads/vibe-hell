@@ -25,6 +25,22 @@ const DEFLECT_POP_COLOR = 0x59f2c8;
 const HIT_POP_COLOR = 0xff3b3b;
 
 /**
+ * QoL "would this get deflected right now" preview - a highlight ring plus a
+ * dashed line showing the trajectory a hit projectile would fly off along.
+ * deflect() always redirects along the hitbox's angle (the player's aim, not
+ * the projectile's incoming direction), so the dashed line is drawn along
+ * that same angle - it's an exact preview, not an approximation.
+ */
+const SLASH_PREVIEW_COLOR = 0xffffff;
+const SLASH_PREVIEW_RING_PADDING = 5;
+const SLASH_PREVIEW_LINE_LENGTH = 70;
+const SLASH_PREVIEW_DASH_LENGTH = 8;
+const SLASH_PREVIEW_GAP_LENGTH = 6;
+const SLASH_PREVIEW_PULSE_PERIOD_MS = 260;
+const SLASH_PREVIEW_MIN_ALPHA = 0.55;
+const SLASH_PREVIEW_MAX_ALPHA = 1;
+
+/**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
  * interaction between them: Slash deflects a hostile projectile or kills an
  * enemy outright (one hit, either way); a deflected/friendly projectile
@@ -39,7 +55,9 @@ const HIT_POP_COLOR = 0xff3b3b;
 export class TimeManager {
   private readonly enemyPool: Enemy[] = [];
   private readonly projectilePool: TimeProjectile[] = [];
+  private readonly previewGraphic: Phaser.GameObjects.Graphics;
   private enemySpawnTimerMs = ENEMY_SPAWN_INTERVAL_MS;
+  private previewPulseMs = 0;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -51,6 +69,7 @@ export class TimeManager {
     for (let i = 0; i < PROJECTILE_POOL_SIZE; i++) {
       this.projectilePool.push(new TimeProjectile(scene, "time-projectile", PROJECTILE_RADIUS));
     }
+    this.previewGraphic = scene.add.graphics();
   }
 
   get enemiesAlive(): number {
@@ -136,6 +155,54 @@ export class TimeManager {
       }
     }
     return false;
+  }
+
+  /**
+   * QoL preview: highlights every hostile projectile that a Slash swung
+   * RIGHT NOW (previewHitbox) would deflect, plus a dashed line showing the
+   * direction it would fly off in (see the SLASH_PREVIEW_* doc comment).
+   * Null hitbox (Slash not ready) just clears the preview. realDelta drives
+   * the highlight's pulse, independent of world dilation - it's a UI aid,
+   * not part of "the world".
+   */
+  updateSlashPreview(previewHitbox: SlashHitbox | null, realDelta: number): void {
+    this.previewPulseMs += realDelta;
+    this.previewGraphic.clear();
+    if (!previewHitbox) {
+      return;
+    }
+
+    const pulse = (Math.sin((this.previewPulseMs / SLASH_PREVIEW_PULSE_PERIOD_MS) * Math.PI * 2) + 1) / 2;
+    const alpha = Phaser.Math.Linear(SLASH_PREVIEW_MIN_ALPHA, SLASH_PREVIEW_MAX_ALPHA, pulse);
+
+    for (const projectile of this.projectilePool) {
+      if (!projectile.active || projectile.deflected) {
+        continue;
+      }
+      if (!this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, previewHitbox)) {
+        continue;
+      }
+      this.drawPreviewHighlight(projectile, previewHitbox.angle, alpha);
+    }
+  }
+
+  private drawPreviewHighlight(projectile: TimeProjectile, trajectoryAngle: number, alpha: number): void {
+    this.previewGraphic.lineStyle(2, SLASH_PREVIEW_COLOR, alpha);
+    this.previewGraphic.strokeCircle(projectile.x, projectile.y, projectile.radius + SLASH_PREVIEW_RING_PADDING);
+
+    const dirX = Math.cos(trajectoryAngle);
+    const dirY = Math.sin(trajectoryAngle);
+    const dashPitch = SLASH_PREVIEW_DASH_LENGTH + SLASH_PREVIEW_GAP_LENGTH;
+    for (let traveled = 0; traveled < SLASH_PREVIEW_LINE_LENGTH; traveled += dashPitch) {
+      const segStart = traveled;
+      const segEnd = Math.min(traveled + SLASH_PREVIEW_DASH_LENGTH, SLASH_PREVIEW_LINE_LENGTH);
+      this.previewGraphic.lineBetween(
+        projectile.x + dirX * segStart,
+        projectile.y + dirY * segStart,
+        projectile.x + dirX * segEnd,
+        projectile.y + dirY * segEnd,
+      );
+    }
   }
 
   private fireProjectile(x: number, y: number, angle: number): void {

@@ -184,6 +184,27 @@ export class TimePlayer {
     };
   }
 
+  /**
+   * The hitbox a Slash would use if triggered this exact instant, aimed at
+   * the player's CURRENT aim angle rather than a locked-in swing angle - for
+   * the "what would get hit right now" QoL preview, not an actual swing.
+   * Null whenever Slash isn't off cooldown, since canSlash() being false
+   * also covers "currently mid-swing" (the cooldown starts the instant a
+   * swing does), so there's no separate check needed for that case.
+   */
+  getPreviewSlashHitbox(): SlashHitbox | null {
+    if (!this.canSlash()) {
+      return null;
+    }
+    return {
+      x: this.position.x,
+      y: this.position.y,
+      angle: this.aimAngle,
+      range: SLASH_RANGE,
+      arcWidth: SLASH_ARC_WIDTH,
+    };
+  }
+
   private canDash(): boolean {
     return this.dashLockoutRemainingMs <= 0;
   }

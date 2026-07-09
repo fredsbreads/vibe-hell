@@ -163,6 +163,7 @@ export class TimeMainScene extends Phaser.Scene {
 
     const deflectedKills = this.timeManager.update(delta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
     const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
+    this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), delta);
     const killsThisFrame = deflectedKills + slashKills;
     this.enemiesDefeated += killsThisFrame;
     if (killsThisFrame > 0) {
