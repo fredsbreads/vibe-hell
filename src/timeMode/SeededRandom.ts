@@ -13,6 +13,23 @@ export class SeededRandom {
     this.state = seed >>> 0;
   }
 
+  /**
+   * Resets this SAME instance back to a fresh seed, in place - rather than
+   * every holder of a reference to this object replacing it with `new
+   * SeededRandom(seed)` themselves. Enemy instances each keep their own
+   * direct reference to TimeManager's rng (captured once, at construction,
+   * for the pool's whole lifetime - see TimeManager's constructor); if
+   * TimeManager.reset() reassigned `this.rng` to a brand new object instead
+   * of reseeding this one, every already-constructed Enemy would keep
+   * reading from the OLD (still-advancing) instance while TimeManager's own
+   * draws (spawn position, projectile kind) used the new one - two
+   * different streams masquerading as one, which is exactly what broke
+   * death-replay fidelity (aim imperfection reproducing the wrong values).
+   */
+  reseed(seed: number): void {
+    this.state = seed >>> 0;
+  }
+
   /** Uniform float in [0, 1). */
   next(): number {
     this.state = (this.state + 0x6d2b79f5) | 0;

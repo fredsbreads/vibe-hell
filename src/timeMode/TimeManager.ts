@@ -86,10 +86,16 @@ export class TimeManager {
    * Drives every random decision that actually affects a run (enemy spawn
    * position, projectile kind, aim imperfection - see SeededRandom's own doc
    * comment) - seeded rather than raw Math.random() so a recorded run can be
-   * replayed bit-for-bit off the same seed. reset() re-seeds it for a fresh
-   * replay loop.
+   * replayed bit-for-bit off the same seed. reset() reseeds this SAME
+   * instance in place (SeededRandom.reseed()) for a fresh replay loop,
+   * rather than replacing it with a new object - every Enemy in the pool
+   * holds its own direct reference to this exact instance (see the
+   * constructor below), captured once for the pool's whole lifetime, so
+   * swapping in a different object here would leave every already-built
+   * Enemy silently reading from a stale, still-advancing generator instead
+   * of the reseeded one.
    */
-  private rng: SeededRandom;
+  private readonly rng: SeededRandom;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -116,7 +122,7 @@ export class TimeManager {
    * spawnInitialEnemies), same as a normal run's startup sequence.
    */
   reset(seed: number): void {
-    this.rng = new SeededRandom(seed);
+    this.rng.reseed(seed);
     for (const enemy of this.enemyPool) {
       if (enemy.isAlive) {
         enemy.deactivate();
