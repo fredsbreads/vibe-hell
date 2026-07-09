@@ -21,17 +21,22 @@ const WANDER_RETARGET_MS = 2200;
  * fast/slow rhythm (see TIMESCALE_PATTERN) on a fixed beat, rather than
  * picking a fully random target each time - a beat reads as "someone doing
  * this on purpose" where independent random picks just read as noise, even
- * though each step still jitters within its band for some variety. Eases
- * toward each new target (rather than jumping instantly), mimicking a stick
- * being gradually pushed or released instead of snapping between values.
+ * though each step still jitters within its band for some variety.
+ *
+ * Glides from one beat's value to the next with a sine ease-in-out spread
+ * across the WHOLE beat (see updateSimulatedTimescale), rather than a
+ * decay-style ease that rushes toward the new target right after each
+ * retarget and then sits nearly flat until the next one - that pattern has
+ * a sharp corner in the velocity right at every beat boundary (arriving
+ * at ~0 speed, then immediately jerking to a high speed again), which reads
+ * as jerky. Sine in-out has zero velocity at both ends of each segment, so
+ * consecutive segments meet smoothly instead of kinking.
  */
 const TIMESCALE_RETARGET_MS = 700;
 type TimescaleBeat = "fast" | "slow";
 const TIMESCALE_PATTERN: TimescaleBeat[] = ["fast", "slow", "slow", "fast", "slow"];
 const TIMESCALE_FAST_RANGE: [number, number] = [0.75, 1];
 const TIMESCALE_SLOW_RANGE: [number, number] = [MIN_WORLD_TIMESCALE, 0.22];
-/** Higher = snaps to the new target faster; this is a per-second ease rate, not a duration. */
-const TIMESCALE_EASE_RATE = 6;
 
 interface Particle {
   x: number;
@@ -74,8 +79,9 @@ export class TitleBackground {
   private readonly graphics: Phaser.GameObjects.Graphics;
 
   private worldTimescale = 1;
+  private timescaleFrom = 1;
   private timescaleTarget = 1;
-  private timescaleRetargetMs = TIMESCALE_RETARGET_MS;
+  private timescaleBeatElapsedMs = 0;
   private timescalePatternIndex = 0;
 
   constructor(private readonly scene: Phaser.Scene) {
@@ -135,18 +141,20 @@ export class TitleBackground {
     }
   }
 
-  /** Advances the fake "stick tilt" toward the next step of the fast/slow rhythm on a fixed beat, easing rather than snapping - see the class-level doc comment. Always driven by real delta, since this is what's simulating the input itself, not something the input scales. */
+  /** Glides the fake "stick tilt" from one step of the fast/slow rhythm to the next, sine-eased across the whole beat - see the class-level doc comment. Always driven by real delta, since this is what's simulating the input itself, not something the input scales. */
   private updateSimulatedTimescale(delta: number): void {
-    this.timescaleRetargetMs -= delta;
-    if (this.timescaleRetargetMs <= 0) {
+    this.timescaleBeatElapsedMs += delta;
+    if (this.timescaleBeatElapsedMs >= TIMESCALE_RETARGET_MS) {
+      this.timescaleBeatElapsedMs -= TIMESCALE_RETARGET_MS;
+      this.timescaleFrom = this.timescaleTarget;
       const beat = TIMESCALE_PATTERN[this.timescalePatternIndex % TIMESCALE_PATTERN.length];
       this.timescalePatternIndex++;
       const [lo, hi] = beat === "fast" ? TIMESCALE_FAST_RANGE : TIMESCALE_SLOW_RANGE;
       this.timescaleTarget = lo + Math.random() * (hi - lo);
-      this.timescaleRetargetMs = TIMESCALE_RETARGET_MS;
     }
-    const ease = Math.min(1, (TIMESCALE_EASE_RATE * delta) / 1000);
-    this.worldTimescale = Phaser.Math.Linear(this.worldTimescale, this.timescaleTarget, ease);
+    const t = Math.min(1, this.timescaleBeatElapsedMs / TIMESCALE_RETARGET_MS);
+    const eased = Phaser.Math.Easing.Sine.InOut(t);
+    this.worldTimescale = Phaser.Math.Linear(this.timescaleFrom, this.timescaleTarget, eased);
   }
 
   private steerChaser(p: Particle, delta: number, dt: number, width: number, height: number): void {
