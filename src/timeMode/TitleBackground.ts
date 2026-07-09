@@ -15,15 +15,21 @@ const TAIL_MAX_ALPHA = 0.75;
 const WANDER_RETARGET_MS = 2200;
 
 /**
- * Simulates an invisible player randomly working the stick, so the whole
- * scatter speeds up and slows down the same way real gameplay's world-time
- * dilation would - without ever drawing a player. Picks a new random target
- * timescale every TIMESCALE_RETARGET_MIN/MAX_MS and eases toward it (rather
- * than jumping instantly), mimicking a stick being gradually pushed or
- * released instead of snapping between values.
+ * Simulates an invisible player working the stick, so the whole scatter
+ * speeds up and slows down the same way real gameplay's world-time dilation
+ * would - without ever drawing a player. Steps through a repeating
+ * fast/slow rhythm (see TIMESCALE_PATTERN) on a fixed beat, rather than
+ * picking a fully random target each time - a beat reads as "someone doing
+ * this on purpose" where independent random picks just read as noise, even
+ * though each step still jitters within its band for some variety. Eases
+ * toward each new target (rather than jumping instantly), mimicking a stick
+ * being gradually pushed or released instead of snapping between values.
  */
-const TIMESCALE_RETARGET_MIN_MS = 700;
-const TIMESCALE_RETARGET_MAX_MS = 2200;
+const TIMESCALE_RETARGET_MS = 1400;
+type TimescaleBeat = "fast" | "slow";
+const TIMESCALE_PATTERN: TimescaleBeat[] = ["fast", "slow", "slow", "fast", "slow"];
+const TIMESCALE_FAST_RANGE: [number, number] = [0.75, 1];
+const TIMESCALE_SLOW_RANGE: [number, number] = [MIN_WORLD_TIMESCALE, 0.22];
 /** Higher = snaps to the new target faster; this is a per-second ease rate, not a duration. */
 const TIMESCALE_EASE_RATE = 3;
 
@@ -69,12 +75,12 @@ export class TitleBackground {
 
   private worldTimescale = 1;
   private timescaleTarget = 1;
-  private timescaleRetargetMs = 0;
+  private timescaleRetargetMs = TIMESCALE_RETARGET_MS;
+  private timescalePatternIndex = 0;
 
   constructor(private readonly scene: Phaser.Scene) {
     this.graphics = scene.add.graphics().setDepth(-1);
     const { width, height } = scene.scale;
-    this.timescaleRetargetMs = Phaser.Math.Between(TIMESCALE_RETARGET_MIN_MS, TIMESCALE_RETARGET_MAX_MS);
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const kind = KINDS[i % KINDS.length];
@@ -129,12 +135,15 @@ export class TitleBackground {
     }
   }
 
-  /** Advances the fake "stick tilt" toward a periodically re-picked random target, easing rather than snapping - see the class-level doc comment. Always driven by real delta, since this is what's simulating the input itself, not something the input scales. */
+  /** Advances the fake "stick tilt" toward the next step of the fast/slow rhythm on a fixed beat, easing rather than snapping - see the class-level doc comment. Always driven by real delta, since this is what's simulating the input itself, not something the input scales. */
   private updateSimulatedTimescale(delta: number): void {
     this.timescaleRetargetMs -= delta;
     if (this.timescaleRetargetMs <= 0) {
-      this.timescaleTarget = MIN_WORLD_TIMESCALE + Math.random() * (1 - MIN_WORLD_TIMESCALE);
-      this.timescaleRetargetMs = Phaser.Math.Between(TIMESCALE_RETARGET_MIN_MS, TIMESCALE_RETARGET_MAX_MS);
+      const beat = TIMESCALE_PATTERN[this.timescalePatternIndex % TIMESCALE_PATTERN.length];
+      this.timescalePatternIndex++;
+      const [lo, hi] = beat === "fast" ? TIMESCALE_FAST_RANGE : TIMESCALE_SLOW_RANGE;
+      this.timescaleTarget = lo + Math.random() * (hi - lo);
+      this.timescaleRetargetMs = TIMESCALE_RETARGET_MS;
     }
     const ease = Math.min(1, (TIMESCALE_EASE_RATE * delta) / 1000);
     this.worldTimescale = Phaser.Math.Linear(this.worldTimescale, this.timescaleTarget, ease);
