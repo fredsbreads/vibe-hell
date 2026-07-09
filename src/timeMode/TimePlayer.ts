@@ -35,6 +35,16 @@ export interface SlashHitbox {
   angle: number;
   range: number;
   arcWidth: number;
+  /**
+   * Identifies which physical swing this hitbox belongs to - a swing's
+   * hitbox stays active across several frames (SLASH_DURATION_MS), and a
+   * projectile can become re-deflectable again (bounce off an enemy) WHILE
+   * that same swing is still active, so TimeManager needs to tell "the same
+   * swing, later frame" apart from "a genuinely new swing" to avoid hitting
+   * the same projectile twice off one button press. -1 for the preview
+   * hitbox, which never actually resolves a hit, so this doesn't matter.
+   */
+  swingId: number;
 }
 
 /**
@@ -74,6 +84,7 @@ export class TimePlayer {
   private slashAngle = 0;
   private slashActiveRemainingMs = 0;
   private slashCooldownRemainingMs = 0;
+  private swingId = 0;
 
   private dead = false;
   private worldTimescaleValue = 1;
@@ -190,6 +201,7 @@ export class TimePlayer {
       angle: this.slashAngle,
       range: SLASH_RANGE,
       arcWidth: SLASH_ARC_WIDTH,
+      swingId: this.swingId,
     };
   }
 
@@ -211,6 +223,7 @@ export class TimePlayer {
       angle: this.aimAngle,
       range: SLASH_RANGE,
       arcWidth: SLASH_ARC_WIDTH,
+      swingId: -1,
     };
   }
 
@@ -269,6 +282,7 @@ export class TimePlayer {
     this.slashAngle = angle;
     this.slashActiveRemainingMs = SLASH_DURATION_MS;
     this.slashCooldownRemainingMs = SLASH_COOLDOWN_MS;
+    this.swingId++;
     this.redrawSlashArc();
   }
 

@@ -143,9 +143,15 @@ export class TimeManager {
       if (projectile.deflected && !projectile.isReDeflectable) {
         continue;
       }
+      // A swing's hitbox stays active across several frames - without this,
+      // a projectile that bounces off an enemy (becoming re-deflectable
+      // again) mid-swing could get hit twice by the same physical swing.
+      if (projectile.wasHitBySwing(hitbox.swingId)) {
+        continue;
+      }
       if (this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, hitbox)) {
         spawnPop(this.scene, projectile.x, projectile.y, DEFLECT_POP_COLOR);
-        projectile.deflect(hitbox.angle);
+        projectile.deflect(hitbox.angle, hitbox.swingId);
       }
     }
 

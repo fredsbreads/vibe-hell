@@ -104,6 +104,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private deflectBurstRemainingMs = 0;
   /** Whether this projectile has bounced off an enemy since its last deflect - see the isReDeflectable doc comment. */
   private bouncedOffEnemySinceDeflect = false;
+  /** Which swing (see SlashHitbox.swingId) last deflected this projectile - see wasHitBySwing(). */
+  private lastHitSwingId = -1;
 
   /** Recent velocity headings (radians), oldest first, sampled every TAIL_SEGMENT_LENGTH of travel - see the TAIL_LENGTH doc comment above. */
   private readonly headingHistory: number[] = [];
@@ -130,6 +132,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.wallBounceCount = 0;
     this.deflectBurstRemainingMs = 0;
     this.bouncedOffEnemySinceDeflect = false;
+    this.lastHitSwingId = -1;
     this.headingHistory.length = 0;
     this.headingHistory.push(aimAngle);
     this.distanceSinceLastSample = 0;
@@ -161,20 +164,36 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     return this.isDeflected && this.bouncedOffEnemySinceDeflect;
   }
 
-  /** The speed this projectile would fly off at if deflected right now - exposed for the "would this get deflected" QoL preview, so it can telegraph a faster post-deflect speed (e.g. a zoomer) with a longer trajectory line. */
+  /** True if a swing with this exact swingId already deflected this projectile - a swing's hitbox stays active across several frames, and the projectile could become isReDeflectable again (bounce off an enemy) mid-swing, so this stops that same physical swing from hitting it twice. See SlashHitbox.swingId. */
+  wasHitBySwing(swingId: number): boolean {
+    return this.lastHitSwingId === swingId;
+  }
+
+  /** The speed this projectile would fly off at if deflected right now - exposed for the "would this get deflected" QoL preview, so it can telegraph a faster post-deflect speed (e.g. a zoomer) with a longer trajectory line, and so a chain of redeflects reads as compounding rather than resetting. */
   get deflectSpeed(): number {
     return this.speed * DEFLECT_SPEED_MULTIPLIER;
   }
 
-  /** Redirects along the player's aim angle at a boosted speed (see DEFLECT_SPEED_MULTIPLIER) - friendly from here on, with a brief real-time burst before it starts being world-time-scaled. Also ends any chasing/ricochet behavior immediately (see step()/bounceOffWall()), regardless of its original kind. Resets isReDeflectable back to false - it has to bounce off another enemy before it can be re-deflected again. */
-  deflect(aimAngle: number): void {
+  /**
+   * Redirects along the player's aim angle - friendly from here on, with a
+   * brief real-time burst before it starts being world-time-scaled. Also
+   * ends any chasing/ricochet behavior immediately (see
+   * step()/bounceOffWall()), regardless of its original kind. Resets
+   * isReDeflectable back to false - it has to bounce off another enemy
+   * before it can be re-deflected again. Speed COMPOUNDS: each redeflect
+   * multiplies the CURRENT speed by DEFLECT_SPEED_MULTIPLIER again, not the
+   * original kind speed, so a projectile that's been redirected multiple
+   * times keeps getting faster.
+   */
+  deflect(aimAngle: number, swingId: number): void {
     this.isDeflected = true;
     this.wallBounceCount = 0;
     this.bouncedOffEnemySinceDeflect = false;
+    this.lastHitSwingId = swingId;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
-    const deflectSpeed = this.deflectSpeed;
-    this.vx = Math.cos(aimAngle) * deflectSpeed;
-    this.vy = Math.sin(aimAngle) * deflectSpeed;
+    this.speed *= DEFLECT_SPEED_MULTIPLIER;
+    this.vx = Math.cos(aimAngle) * this.speed;
+    this.vy = Math.sin(aimAngle) * this.speed;
     this.setTintFill(DEFLECT_TINT);
   }
 
