@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { ProjectileKind, KIND_CONFIG, CHASER_TURN_RATE } from "./TimeProjectile";
+import { MIN_WORLD_TIMESCALE } from "./worldClock";
 
 const PARTICLE_COUNT = 60;
 const KINDS: ProjectileKind[] = ["straight", "zoomer", "chaser", "ricochet"];
@@ -10,8 +11,21 @@ const TAIL_SEGMENTS = 8;
 const TAIL_SEGMENT_LENGTH = TAIL_LENGTH / TAIL_SEGMENTS;
 const TAIL_MAX_ALPHA = 0.75;
 
-/** How often (real ms) a chaser picks a new random point to curve toward, since there's no player here to home in on. */
+/** How often (real ms, before world-timescale scaling) a chaser picks a new random point to curve toward, since there's no player here to home in on. */
 const WANDER_RETARGET_MS = 2200;
+
+/**
+ * Simulates an invisible player randomly working the stick, so the whole
+ * scatter speeds up and slows down the same way real gameplay's world-time
+ * dilation would - without ever drawing a player. Picks a new random target
+ * timescale every TIMESCALE_RETARGET_MIN/MAX_MS and eases toward it (rather
+ * than jumping instantly), mimicking a stick being gradually pushed or
+ * released instead of snapping between values.
+ */
+const TIMESCALE_RETARGET_MIN_MS = 700;
+const TIMESCALE_RETARGET_MAX_MS = 2200;
+/** Higher = snaps to the new target faster; this is a per-second ease rate, not a duration. */
+const TIMESCALE_EASE_RATE = 3;
 
 interface Particle {
   x: number;
@@ -37,6 +51,13 @@ interface Particle {
  * player, since there isn't one on the title screen; ricochets pick a fresh
  * random direction on each bounce instead of re-aiming at anything.
  *
+ * The whole scatter also speeds up and slows down over time, as if an
+ * invisible player were working the stick (see updateSimulatedTimescale) -
+ * movement, chaser turning, and the chaser wander-retarget timer all scale
+ * by this simulated world timescale, same as real gameplay dilates
+ * everything about "the world". No player is ever drawn; only its effect on
+ * the pace of everything else shows up.
+ *
  * Deliberately its own simple thing rather than reusing TimeProjectile
  * directly - this never needs hit detection, deflection, or the hex arena's
  * rotating boundary, just a rectangle to bounce inside, so pulling in
@@ -46,9 +67,14 @@ export class TitleBackground {
   private readonly particles: Particle[] = [];
   private readonly graphics: Phaser.GameObjects.Graphics;
 
+  private worldTimescale = 1;
+  private timescaleTarget = 1;
+  private timescaleRetargetMs = 0;
+
   constructor(private readonly scene: Phaser.Scene) {
     this.graphics = scene.add.graphics().setDepth(-1);
     const { width, height } = scene.scale;
+    this.timescaleRetargetMs = Phaser.Math.Between(TIMESCALE_RETARGET_MIN_MS, TIMESCALE_RETARGET_MAX_MS);
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const kind = KINDS[i % KINDS.length];
@@ -75,12 +101,14 @@ export class TitleBackground {
 
   update(delta: number): void {
     const { width, height } = this.scene.scale;
-    const dt = delta / 1000;
+    this.updateSimulatedTimescale(delta);
+    const scaledDelta = delta * this.worldTimescale;
+    const dt = scaledDelta / 1000;
     this.graphics.clear();
 
     for (const p of this.particles) {
       if (p.kind === "chaser") {
-        this.steerChaser(p, delta, dt, width, height);
+        this.steerChaser(p, scaledDelta, dt, width, height);
       }
 
       const moveDist = Math.hypot(p.vx, p.vy) * dt;
@@ -99,6 +127,17 @@ export class TitleBackground {
       this.graphics.fillStyle(p.color, 1);
       this.graphics.fillCircle(p.x, p.y, RADIUS);
     }
+  }
+
+  /** Advances the fake "stick tilt" toward a periodically re-picked random target, easing rather than snapping - see the class-level doc comment. Always driven by real delta, since this is what's simulating the input itself, not something the input scales. */
+  private updateSimulatedTimescale(delta: number): void {
+    this.timescaleRetargetMs -= delta;
+    if (this.timescaleRetargetMs <= 0) {
+      this.timescaleTarget = MIN_WORLD_TIMESCALE + Math.random() * (1 - MIN_WORLD_TIMESCALE);
+      this.timescaleRetargetMs = Phaser.Math.Between(TIMESCALE_RETARGET_MIN_MS, TIMESCALE_RETARGET_MAX_MS);
+    }
+    const ease = Math.min(1, (TIMESCALE_EASE_RATE * delta) / 1000);
+    this.worldTimescale = Phaser.Math.Linear(this.worldTimescale, this.timescaleTarget, ease);
   }
 
   private steerChaser(p: Particle, delta: number, dt: number, width: number, height: number): void {
