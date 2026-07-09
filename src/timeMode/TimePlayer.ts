@@ -78,6 +78,23 @@ export class TimePlayer {
   private readonly slashGraphic: Phaser.GameObjects.Graphics;
   private readonly slashRangeGraphic: Phaser.GameObjects.Graphics;
 
+  /**
+   * Current velocity, applied to sprite.x/y by hand each update() call
+   * (see the end of update()) rather than via sprite.setVelocity() + Arcade
+   * Physics' own automatic once-per-real-rendered-frame integration.
+   * Deliberate: the death replay calls update() several times per real
+   * frame (see TimeMainScene's REPLAY_STEPS_PER_FRAME) to fast-forward
+   * playback, each with its own recorded delta - Arcade's auto-integration
+   * only ever applies the LAST of those velocities across the REAL frame's
+   * own delta, silently discarding the others and drifting the replay's
+   * position off the original run's. Manual integration makes movement a
+   * pure function of "how many times update() was called, with what
+   * deltas" instead of real wall-clock frame timing, which is what actually
+   * makes the replay reproduce the recorded run's movement exactly.
+   */
+  private velocityX = 0;
+  private velocityY = 0;
+
   private isDashing = false;
   private dashTimeRemainingMs = 0;
   private dashLockoutRemainingMs = 0;
@@ -142,19 +159,19 @@ export class TimePlayer {
     this.input.resyncHeldState?.(this.position.x, this.position.y);
   }
 
-  /**
-   * @param forcedWorldTimescale If given, used directly instead of deriving
-   * the world timescale from this frame's movement input - the death
-   * replay forces a fast constant pace (see TimeMainScene) so the world
-   * plays out lively regardless of how dilated it actually was live, while
-   * the player's own recorded movement still replays through this exact
-   * same code path.
-   */
-  update(realDelta: number, forcedWorldTimescale?: number): void {
+  update(realDelta: number): void {
     const state = this.input.read(this.position.x, this.position.y);
     this.lastInputStateValue = state;
     this.aimAngle = state.aimAngle;
-    this.worldTimescaleValue = forcedWorldTimescale ?? computeWorldTimescale(state.moveX, state.moveY);
+    // Deliberately always DERIVED from this frame's moveX/moveY, live or
+    // replayed alike - during a death replay this reproduces the exact same
+    // worldScaledDelta sequence the original run had (a pure function of
+    // already-recorded input), which is what makes the replay's enemy
+    // spawns/projectile timing/RNG draws actually match what really
+    // happened, instead of a different run that just started from the same
+    // seed. See TimeMainScene's REPLAY_STEPS_PER_FRAME for how the replay
+    // still plays back faster than the original run without touching this.
+    this.worldTimescaleValue = computeWorldTimescale(state.moveX, state.moveY);
     const worldScaledDelta = realDelta * this.worldTimescaleValue;
 
     this.tickCooldowns(realDelta, worldScaledDelta);
@@ -180,8 +197,14 @@ export class TimePlayer {
         move.normalize().scale(MOVE_SPEED * tilt);
       }
       this.clipOutwardComponent(move);
-      this.sprite.setVelocity(move.x, move.y);
+      this.velocityX = move.x;
+      this.velocityY = move.y;
     }
+    // While dashing, velocityX/Y deliberately stay whatever startDash() set -
+    // applied here every call just like the non-dashing case above, instead
+    // of relying on Arcade to keep re-applying a velocity we set once.
+    this.sprite.x += (this.velocityX * realDelta) / 1000;
+    this.sprite.y += (this.velocityY * realDelta) / 1000;
 
     this.clampToArena();
     this.redrawAimIndicator();
@@ -189,8 +212,7 @@ export class TimePlayer {
   }
 
   private get position(): { x: number; y: number } {
-    const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-    return body.center;
+    return { x: this.sprite.x, y: this.sprite.y };
   }
 
   get isDead(): boolean {
@@ -208,7 +230,8 @@ export class TimePlayer {
    */
   reset(x: number, y: number): void {
     this.sprite.setPosition(x, y);
-    (this.sprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+    this.velocityX = 0;
+    this.velocityY = 0;
     this.sprite.clearTint();
 
     this.isDashing = false;
@@ -321,7 +344,8 @@ export class TimePlayer {
     this.isDashing = true;
     this.dashTimeRemainingMs = DASH_DURATION_MS;
     this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
-    this.sprite.setVelocity(dashVelocity.x, dashVelocity.y);
+    this.velocityX = dashVelocity.x;
+    this.velocityY = dashVelocity.y;
     this.sprite.setTint(DASH_TINT);
     this.spawnDashGhost();
   }
@@ -449,9 +473,8 @@ export class TimePlayer {
   }
 
   private clipOutwardComponent(velocity: Phaser.Math.Vector2): void {
-    const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-    const dx = body.center.x - this.arena.bounds.centerX;
-    const dy = body.center.y - this.arena.bounds.centerY;
+    const dx = this.sprite.x - this.arena.bounds.centerX;
+    const dy = this.sprite.y - this.arena.bounds.centerY;
     const distFromCenter = Math.sqrt(dx * dx + dy * dy);
     if (distFromCenter === 0) {
       return;
@@ -471,9 +494,8 @@ export class TimePlayer {
   }
 
   private clampToArena(): void {
-    const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-    const dx = body.center.x - this.arena.bounds.centerX;
-    const dy = body.center.y - this.arena.bounds.centerY;
+    const dx = this.sprite.x - this.arena.bounds.centerX;
+    const dy = this.sprite.y - this.arena.bounds.centerY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= 0) {
       return;
@@ -484,10 +506,8 @@ export class TimePlayer {
 
     if (dist > maxDist) {
       const scale = maxDist / dist;
-      const clampedX = this.arena.bounds.centerX + dx * scale;
-      const clampedY = this.arena.bounds.centerY + dy * scale;
-      body.position.x = clampedX - body.halfWidth;
-      body.position.y = clampedY - body.halfHeight;
+      this.sprite.x = this.arena.bounds.centerX + dx * scale;
+      this.sprite.y = this.arena.bounds.centerY + dy * scale;
     }
   }
 }

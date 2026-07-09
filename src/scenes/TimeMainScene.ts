@@ -27,15 +27,16 @@ const DEATH_SHAKE_INTENSITY = 0.012;
 const DEATH_FLASH_DURATION_MS = 200;
 
 /**
- * The death replay's forced world timescale - full, undilated pace
- * regardless of how dilated the world actually was live, so watching the
- * run back reads as brisk normal-speed action instead of reproducing the
- * original slow-mo (the player's own recorded movement still replays
- * through the exact same update() path either way - see TimePlayer.update's
- * forcedWorldTimescale param).
+ * How many recorded frames the replay steps through per real rendered frame -
+ * uniformly fast-forwards the whole simulation (world included) rather than
+ * playing it back 1:1, so watching a whole run doesn't take as long as
+ * playing it did. Deliberately the ONLY thing that makes the replay run
+ * faster than the original - world timescale itself is always re-derived
+ * from the recorded moveX/moveY each step (see TimePlayer.update), the exact
+ * same as it was live, so the replay reproduces the actual run (same enemy
+ * spawns/timing/RNG draws) rather than a different run that only shares a
+ * seed and a start position.
  */
-const REPLAY_WORLD_TIMESCALE = 1;
-/** How many recorded frames the replay steps through per real rendered frame - a straightforward fast-forward on top of the timescale override, similar to it, so watching a whole run back doesn't take as long as playing it did. */
 const REPLAY_STEPS_PER_FRAME = 3;
 
 /**
@@ -242,14 +243,15 @@ export class TimeMainScene extends Phaser.Scene {
   /**
    * Drives the death replay: steps the exact same simulation code the live
    * run used (player/arena/timeManager update, slash-hit resolution,
-   * player-hit death check), but fed by the recorded input stream instead of
-   * a live device, and at a fixed brisk pace (REPLAY_WORLD_TIMESCALE) rather
-   * than whatever the world timescale actually was live - see the constants'
-   * doc comments. Steps REPLAY_STEPS_PER_FRAME recorded frames per real
-   * render, and loops back to the start (resetForReplayLoop) the instant
-   * either the recording runs out or the player dies again, so it plays
-   * forever behind the (compact, corner-layout) Game Over menu until the
-   * player restarts or leaves.
+   * player-hit death check), fed by the recorded input stream instead of a
+   * live device. World timescale is re-derived from each step's recorded
+   * moveX/moveY exactly as it was live (see TimePlayer.update) - the only
+   * thing sped up is wall-clock playback (REPLAY_STEPS_PER_FRAME), so this
+   * reproduces the actual run rather than a different one. Steps
+   * REPLAY_STEPS_PER_FRAME recorded frames per real render, and loops back
+   * to the start (resetForReplayLoop) the instant either the recording runs
+   * out or the player dies again, so it plays forever behind the (compact,
+   * corner-layout) Game Over menu until the player restarts or leaves.
    */
   private updateReplay(): void {
     if (!this.replaySource) {
@@ -262,8 +264,8 @@ export class TimeMainScene extends Phaser.Scene {
       }
 
       const stepDelta = this.replaySource.nextDelta;
-      this.player.update(stepDelta, REPLAY_WORLD_TIMESCALE);
-      const worldScaledDelta = stepDelta * REPLAY_WORLD_TIMESCALE;
+      this.player.update(stepDelta);
+      const worldScaledDelta = stepDelta * this.player.worldTimescale;
       this.arena.update(worldScaledDelta);
 
       const deflectedKills = this.timeManager.update(stepDelta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
@@ -280,7 +282,7 @@ export class TimeMainScene extends Phaser.Scene {
     }
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.replayEnemiesDefeated}`);
-    this.timescaleText.setText(`world: ${Math.round(REPLAY_WORLD_TIMESCALE * 100)}%`);
+    this.timescaleText.setText(`world: ${Math.round(this.player.worldTimescale * 100)}%`);
     const dashLabel =
       this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
     const slashLabel =
@@ -398,7 +400,7 @@ export class TimeMainScene extends Phaser.Scene {
     this.menuHintText.setVisible(true);
   }
 
-  /** Swaps the (already-showing) menu overlay to the OPTIONS screen - onBack is called (and the overlay swapped back) on BACK/esc/circle. Reuses the single shared menuOverlay rather than a separate instance, matching how pause/game-over already share it. */
+  /** Swaps the (already-showing) menu overlay to the OPTIONS screen - onBack is called (and the overlay swapped back) on BACK/esc/circle. Reuses the single shared menuOverlay rather than a separate instance, matching how pause/game-over already share it. Always full-screen "center" layout regardless of which menu opened it (the Game Over corner menu is too small to fit this), so its own nav hint text is shown here too and hidden again once onBack takes over. */
   private showOptions(onBack: () => void): void {
     this.optionsBackTarget = onBack;
     this.resyncMenuNavHeldState();
@@ -412,6 +414,7 @@ export class TimeMainScene extends Phaser.Scene {
       },
       { label: "BACK", onSelect: () => this.closeOptions() },
     ]);
+    this.menuHintText.setVisible(true);
   }
 
   private closeOptions(): void {
@@ -438,24 +441,30 @@ export class TimeMainScene extends Phaser.Scene {
     // the compact corner menu, unlike the full-screen Pause overlay.
     this.cameras.main.shake(DEATH_SHAKE_DURATION_MS, DEATH_SHAKE_INTENSITY);
     this.cameras.main.flash(DEATH_FLASH_DURATION_MS, 255, 59, 59);
+    // The compact corner menu is self-explanatory (two clickable/highlightable
+    // buttons right under the title) - the full hint text is sized/positioned
+    // for the old full-screen centered menu and would clutter the small panel.
+    this.showGameOverMenu();
+
+    this.replaySource = new RecordedInputSource(this.recordedFrames);
+    this.player.setInputSource(this.replaySource);
+    this.resetForReplayLoop();
+  }
+
+  /** (Re-)shows the Game Over corner menu - split out from enterGameOver() so returning here from OPTIONS doesn't repeat the one-time death shake/flash/replay setup. */
+  private showGameOverMenu(): void {
     this.resyncMenuNavHeldState();
     this.menuOverlay.show(
       "GAME OVER",
       `Enemies Defeated: ${this.enemiesDefeated}`,
       [
         { label: "RESTART", onSelect: () => this.restartRun() },
+        { label: "OPTIONS", onSelect: () => this.showOptions(() => this.showGameOverMenu()) },
         { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
       ],
       "corner",
     );
-    // The compact corner menu is self-explanatory (two clickable/highlightable
-    // buttons right under the title) - the full hint text is sized/positioned
-    // for the old full-screen centered menu and would clutter the small panel.
     this.menuHintText.setVisible(false);
-
-    this.replaySource = new RecordedInputSource(this.recordedFrames);
-    this.player.setInputSource(this.replaySource);
-    this.resetForReplayLoop();
   }
 
   private restartRun(): void {

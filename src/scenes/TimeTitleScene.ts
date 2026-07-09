@@ -8,6 +8,8 @@ const FOCUS_COLOR = "#ffe98a";
 /** Matches PlayerInput's own trigger threshold - R2 is analog, so "pressed" means past this value, not just nonzero. */
 const TRIGGER_THRESHOLD = 0.5;
 
+const UNFOCUSED_COLOR = "#59f2c8";
+
 /** Minimal title screen for the time-dilation mode - PLAY plus an OPTIONS screen (currently just the Slash-range-indicator toggle), no wave stepper (there are no waves in an endless-only first pass). */
 export class TimeTitleScene extends Phaser.Scene {
   private titleBackground!: TitleBackground;
@@ -15,6 +17,10 @@ export class TimeTitleScene extends Phaser.Scene {
   private titleText!: Phaser.GameObjects.Text;
   private playButton!: Phaser.GameObjects.Text;
   private optionsButton!: Phaser.GameObjects.Text;
+  private navHintText!: Phaser.GameObjects.Text;
+
+  /** Which of [PLAY, OPTIONS] Up/Down/D-Pad/Stick navigation currently highlights - the single source of truth Confirm acts on, so keyboard/gamepad play can actually reach OPTIONS (previously Confirm always started the game outright, with no way to navigate onto OPTIONS without already knowing the O/Triangle shortcut). Mouse clicks on either button still work directly regardless of this. */
+  private titleFocusedIndex: 0 | 1 = 0;
 
   /** True while the OPTIONS overlay is up - gates the bare title screen's own shortcuts (Enter/Space/Cross/R2 starting the game) so they don't fire while a submenu is open. */
   private optionsOpen = false;
@@ -57,16 +63,27 @@ export class TimeTitleScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     this.playButton.on("pointerdown", () => this.startGame());
+    this.playButton.on("pointerover", () => this.setTitleFocus(0));
 
     this.optionsButton = this.add
       .text(width / 2, height / 2 + 90, "OPTIONS", {
         fontFamily: "monospace",
         fontSize: "18px",
-        color: "#59f2c8",
+        color: UNFOCUSED_COLOR,
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     this.optionsButton.on("pointerdown", () => this.openOptions());
+    this.optionsButton.on("pointerover", () => this.setTitleFocus(1));
+
+    this.navHintText = this.add
+      .text(width / 2, height / 2 + 130, "Up/Down or D-Pad/Stick to select  ·  Enter/Cross confirm", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#6a6a80",
+        align: "center",
+      })
+      .setOrigin(0.5);
 
     this.menuOverlay = new MenuOverlay(this, width, height);
 
@@ -121,8 +138,23 @@ export class TimeTitleScene extends Phaser.Scene {
       return;
     }
 
+    const stickY = pad?.leftStick.y ?? 0;
+    const upHeld = this.menuUpKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_UP) || stickY < -0.5;
+    const upPressed = upHeld && !this.prevMenuUpHeld;
+    this.prevMenuUpHeld = upHeld;
+    const downHeld = this.menuDownKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_DOWN) || stickY > 0.5;
+    const downPressed = downHeld && !this.prevMenuDownHeld;
+    this.prevMenuDownHeld = downHeld;
+    if (upPressed || downPressed) {
+      this.setTitleFocus(this.titleFocusedIndex === 0 ? 1 : 0);
+    }
+
     if (confirmPressed) {
-      this.startGame();
+      if (this.titleFocusedIndex === 0) {
+        this.startGame();
+      } else {
+        this.openOptions();
+      }
       return;
     }
 
@@ -132,6 +164,13 @@ export class TimeTitleScene extends Phaser.Scene {
     if (optionsKeyPressed) {
       this.openOptions();
     }
+  }
+
+  /** Moves keyboard/gamepad focus between PLAY (0) and OPTIONS (1), and updates their highlight colors to match - mouse hover calls this too (see create()), so hovering and D-Pad navigation always agree on which one is highlighted. */
+  private setTitleFocus(index: 0 | 1): void {
+    this.titleFocusedIndex = index;
+    this.playButton.setColor(index === 0 ? FOCUS_COLOR : UNFOCUSED_COLOR);
+    this.optionsButton.setColor(index === 1 ? FOCUS_COLOR : UNFOCUSED_COLOR);
   }
 
   private readConfirmHeld(pad: Phaser.Input.Gamepad.Gamepad | undefined): boolean {
@@ -152,6 +191,7 @@ export class TimeTitleScene extends Phaser.Scene {
     this.titleText.setVisible(false);
     this.playButton.setVisible(false);
     this.optionsButton.setVisible(false);
+    this.navHintText.setVisible(false);
     const pad = this.input.gamepad?.pad1;
     const stickY = pad?.leftStick.y ?? 0;
     // Resync so whatever button opened this (Enter/O/Triangle) doesn't also
@@ -181,6 +221,11 @@ export class TimeTitleScene extends Phaser.Scene {
     this.titleText.setVisible(true);
     this.playButton.setVisible(true);
     this.optionsButton.setVisible(true);
+    this.navHintText.setVisible(true);
+    // Whichever button was focused before OPTIONS was reached (mouse hover,
+    // D-Pad, or the O/Triangle shortcut, which doesn't touch focus at all)
+    // might not match titleFocusedIndex's highlight anymore visually - resync.
+    this.setTitleFocus(this.titleFocusedIndex);
   }
 
   private startGame(): void {
