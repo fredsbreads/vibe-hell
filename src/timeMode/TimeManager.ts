@@ -50,8 +50,10 @@ const SLASH_PREVIEW_MARCH_STEP = 4;
 const SLASH_PREVIEW_MAX_BOUNCES = 4;
 /** Extra length granted to the budget each time the preview path bounces off a wall - without this, a bounce early in the line leaves too little of the length budget for the post-bounce segment to show anything useful. */
 const SLASH_PREVIEW_BOUNCE_BONUS = 40;
-/** Radius of the small "this is also in the chain" dot drawn on an enemy the (deliberately short) preview line doesn't reach - see findChainedEnemyBeforeWall. Distinctly smaller than a full preview ring so it doesn't compete with it. */
-const SLASH_PREVIEW_CHAIN_MARKER_RADIUS = 4;
+/** Length (px) of the small floating "in" and "out" stub segments drawn at each chained enemy beyond what the primary line reaches - see buildChainHops. Short and local by design: it's a directional cue for that one bounce, not a connecting line across whatever empty space sits before/after it. */
+const SLASH_PREVIEW_CHAIN_STUB_LENGTH = 26;
+/** Safety cap on how many enemy-to-enemy hops the chain lookahead will follow beyond the primary line - the chain is stopped for real by the first wall bounce or by running out of alive enemies long before this, this just guards against a degenerate arrangement of enemies bouncing back and forth forever. */
+const SLASH_PREVIEW_MAX_CHAIN_HOPS = 6;
 
 /**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
@@ -251,7 +253,7 @@ export class TimeManager {
       SLASH_PREVIEW_MAX_LINE_LENGTH,
     );
 
-    const { path, hitEnemies, chainedMarkerEnemy } = this.buildPreviewPath(
+    const { path, hitEnemies, lastBounce } = this.buildPreviewPath(
       projectile.x,
       projectile.y,
       trajectoryAngle,
@@ -265,18 +267,27 @@ export class TimeManager {
     for (const enemy of hitEnemies) {
       this.drawPreviewRing(enemy.x, enemy.y, Enemy.RADIUS, alpha);
     }
-    // A further enemy down the chain that the (deliberately short) line
-    // doesn't reach still gets a small heads-up marker, as long as nothing
-    // reaches it first - not a full ring, and not a line stretched all the
-    // way there.
-    if (chainedMarkerEnemy && !hitEnemies.includes(chainedMarkerEnemy)) {
-      this.drawChainMarker(chainedMarkerEnemy.x, chainedMarkerEnemy.y, alpha);
+    // Further enemies down the chain that the (deliberately short) line
+    // doesn't reach still get the same ring-plus-in/out-stub treatment as
+    // the enemies the primary line hits directly, just as small floating
+    // segments instead of one continuous line stretched across whatever
+    // empty space separates them - and it keeps going hop to hop for as
+    // long as each next thing along the way is another enemy rather than a
+    // wall (see buildChainHops).
+    if (lastBounce && lastBounce.wasEnemy) {
+      const hops = this.buildChainHops(lastBounce.x, lastBounce.y, lastBounce.dirX, lastBounce.dirY, projectile.radius, lastBounce.enemy);
+      for (const hop of hops) {
+        this.drawPreviewRing(hop.enemy.x, hop.enemy.y, Enemy.RADIUS, alpha);
+        this.drawDashedPath([
+          { x: hop.point.x - hop.dirIn.x * SLASH_PREVIEW_CHAIN_STUB_LENGTH, y: hop.point.y - hop.dirIn.y * SLASH_PREVIEW_CHAIN_STUB_LENGTH },
+          hop.point,
+        ]);
+        this.drawDashedPath([
+          hop.point,
+          { x: hop.point.x + hop.dirOut.x * SLASH_PREVIEW_CHAIN_STUB_LENGTH, y: hop.point.y + hop.dirOut.y * SLASH_PREVIEW_CHAIN_STUB_LENGTH },
+        ]);
+      }
     }
-  }
-
-  private drawChainMarker(x: number, y: number, alpha: number): void {
-    this.previewGraphic.fillStyle(SLASH_PREVIEW_COLOR, alpha);
-    this.previewGraphic.fillCircle(x, y, SLASH_PREVIEW_CHAIN_MARKER_RADIUS);
   }
 
   /**
@@ -305,16 +316,16 @@ export class TimeManager {
    * - the caller rings each of those too, not just the very first thing in
    * slash range right now. This stays deliberately short/cosmetic though
    * (see SLASH_PREVIEW_BOUNCE_BONUS) - it's a guide line, not a full replay
-   * of the shot's entire life. A chain into a FURTHER enemy beyond what this
-   * short line reaches is instead surfaced separately via
-   * findChainedEnemyBeforeWall (see chainedMarkerEnemy) - a small marker
-   * rather than stretching the drawn line arbitrarily far to reach it.
-   * Deliberately doesn't do any of this for hostile projectiles: they don't
-   * redirect the path (no bounce happens there, it just destroys them and
-   * keeps flying straight), and unlike a stationary enemy they're actively
-   * moving, so a "will this still be here when the real shot arrives"
-   * prediction would be far less reliable - not worth the complexity for
-   * markers that could easily lie.
+   * of the shot's entire life. Also returns lastBounce - where the drawn
+   * path's final bounce happened (if any) and whether it was off an enemy -
+   * so the caller can pick up the chain from exactly there via
+   * buildChainHops, without duplicating anything this short line already
+   * drew. Deliberately doesn't do any of this for hostile projectiles: they
+   * don't redirect the path (no bounce happens there, it just destroys them
+   * and keeps flying straight), and unlike a stationary enemy they're
+   * actively moving, so a "will this still be here when the real shot
+   * arrives" prediction would be far less reliable - not worth the
+   * complexity for markers that could easily lie.
    */
   private buildPreviewPath(
     startX: number,
@@ -322,7 +333,11 @@ export class TimeManager {
     angle: number,
     radius: number,
     lineLength: number,
-  ): { path: { x: number; y: number }[]; hitEnemies: Enemy[]; chainedMarkerEnemy: Enemy | null } {
+  ): {
+    path: { x: number; y: number }[];
+    hitEnemies: Enemy[];
+    lastBounce: { x: number; y: number; dirX: number; dirY: number; wasEnemy: boolean; enemy: Enemy | null } | null;
+  } {
     const points: { x: number; y: number }[] = [{ x: startX, y: startY }];
     const hitEnemies: Enemy[] = [];
     let x = startX;
@@ -332,14 +347,21 @@ export class TimeManager {
     let remaining = lineLength;
     let bounces = 0;
     let wallBounceBudget = DEFLECT_MAX_WALL_BOUNCES;
-    let firstEnemyBounce: { x: number; y: number; dirX: number; dirY: number } | null = null;
+    let lastBounce: { x: number; y: number; dirX: number; dirY: number; wasEnemy: boolean; enemy: Enemy | null } | null = null;
+    // The enemy just bounced off, excluded from the very next detection step
+    // only - right after a reflection, a grazing hit can leave the march
+    // still just barely inside that same enemy's radius, which would
+    // otherwise register as an immediate second "bounce" off the body it
+    // just left instead of continuing on. Cleared the moment anything else
+    // (a wall, or a different enemy) is hit.
+    let justBouncedEnemy: Enemy | null = null;
 
     while (remaining > 0 && bounces <= SLASH_PREVIEW_MAX_BOUNCES) {
       const step = Math.min(SLASH_PREVIEW_MARCH_STEP, remaining);
       const nextX = x + dirX * step;
       const nextY = y + dirY * step;
 
-      const blockingEnemy = this.findEnemyBlockingPoint(nextX, nextY, radius);
+      const blockingEnemy = this.findEnemyBlockingPoint(nextX, nextY, radius, justBouncedEnemy);
       if (blockingEnemy) {
         const dx = nextX - blockingEnemy.x;
         const dy = nextY - blockingEnemy.y;
@@ -357,9 +379,8 @@ export class TimeManager {
         dirX -= 2 * dot * nx;
         dirY -= 2 * dot * ny;
 
-        if (!firstEnemyBounce) {
-          firstEnemyBounce = { x, y, dirX, dirY };
-        }
+        lastBounce = { x, y, dirX, dirY, wasEnemy: true, enemy: blockingEnemy };
+        justBouncedEnemy = blockingEnemy;
 
         wallBounceBudget = DEFLECT_MAX_WALL_BOUNCES;
         remaining -= step;
@@ -387,9 +408,11 @@ export class TimeManager {
       points.push({ x, y });
 
       wallBounceBudget--;
+      justBouncedEnemy = null;
       if (wallBounceBudget <= 0) {
         // The real projectile despawns right here - the trace ends at this
         // bounce point instead of drawing a trajectory it wouldn't survive.
+        lastBounce = { x, y, dirX, dirY, wasEnemy: false, enemy: null };
         break;
       }
 
@@ -398,69 +421,130 @@ export class TimeManager {
       dirX -= 2 * dot * n.x;
       dirY -= 2 * dot * n.y;
 
+      lastBounce = { x, y, dirX, dirY, wasEnemy: false, enemy: null };
+
       remaining -= step;
       remaining += SLASH_PREVIEW_BOUNCE_BONUS;
       bounces++;
     }
 
     points.push({ x, y });
-
-    const chainedMarkerEnemy = firstEnemyBounce
-      ? this.findChainedEnemyBeforeWall(firstEnemyBounce.x, firstEnemyBounce.y, firstEnemyBounce.dirX, firstEnemyBounce.dirY, radius)
-      : null;
-
-    return { path: points, hitEnemies, chainedMarkerEnemy };
+    return { path: points, hitEnemies, lastBounce };
   }
 
   /**
-   * Straight-line lookahead from the FIRST enemy bounce: is there another
-   * enemy directly down that ray before it would exit the arena? Separate
-   * from the drawn path's own (deliberately short, cosmetic) length budget -
-   * this check has no length cap of its own, since it's not "how far does
-   * the visible line reach", just "does the next thing this trajectory
-   * would hit happen to be an enemy rather than a wall". A wall in the way
-   * means no marker; only an unobstructed hit on another enemy counts,
-   * matching what the player actually asked for: a small heads-up that
-   * deflecting off THIS enemy chains into another one, without drawing a
-   * long line all the way there.
+   * Continues the chain beyond wherever the (deliberately short) primary
+   * line left off, hopping from enemy to enemy for as long as the very next
+   * thing directly down the ray is another enemy rather than a wall - a
+   * wall in the way ends the chain right there, matching "don't chain past
+   * a wall bounce". Each hop is a straight-line lookahead (no bounce-off-
+   * enemy math needed until an enemy is actually found), then reflects off
+   * that enemy's round body the same way the real projectile/primary line
+   * does, and looks ahead again from there for the next one - so a whole
+   * row of enemies can chain, not just one extra hop.
    */
-  private findChainedEnemyBeforeWall(
+  private buildChainHops(
     startX: number,
     startY: number,
     dirX: number,
     dirY: number,
     radius: number,
-  ): Enemy | null {
+    excludeEnemy: Enemy | null,
+  ): { enemy: Enemy; point: { x: number; y: number }; dirIn: { x: number; y: number }; dirOut: { x: number; y: number } }[] {
+    const hops: { enemy: Enemy; point: { x: number; y: number }; dirIn: { x: number; y: number }; dirOut: { x: number; y: number } }[] = [];
+    let x = startX;
+    let y = startY;
+    let curDirX = dirX;
+    let curDirY = dirY;
+    let curExclude = excludeEnemy;
+
+    for (let hop = 0; hop < SLASH_PREVIEW_MAX_CHAIN_HOPS; hop++) {
+      const next = this.findNextChainedEnemy(x, y, curDirX, curDirY, radius, curExclude);
+      if (!next) {
+        break;
+      }
+
+      const dx = next.point.x - next.enemy.x;
+      const dy = next.point.y - next.enemy.y;
+      const distFromEnemy = Math.hypot(dx, dy);
+      const nx = dx / distFromEnemy;
+      const ny = dy / distFromEnemy;
+      const dot = curDirX * nx + curDirY * ny;
+      const dirOutX = curDirX - 2 * dot * nx;
+      const dirOutY = curDirY - 2 * dot * ny;
+
+      hops.push({
+        enemy: next.enemy,
+        point: next.point,
+        dirIn: { x: curDirX, y: curDirY },
+        dirOut: { x: dirOutX, y: dirOutY },
+      });
+
+      x = next.point.x;
+      y = next.point.y;
+      curDirX = dirOutX;
+      curDirY = dirOutY;
+      curExclude = next.enemy;
+    }
+
+    return hops;
+  }
+
+  /**
+   * Straight-line lookahead: is there another enemy directly down this ray
+   * before it would exit the arena? No length cap of its own, since it's
+   * not "how far does a visible line reach", just "does the next thing this
+   * trajectory would hit happen to be an enemy rather than a wall".
+   */
+  private findNextChainedEnemy(
+    startX: number,
+    startY: number,
+    dirX: number,
+    dirY: number,
+    radius: number,
+    excludeEnemy: Enemy | null,
+  ): { enemy: Enemy; point: { x: number; y: number } } | null {
     let x = startX;
     let y = startY;
     // The arena is finite and convex, so this always terminates well before
     // this many steps - generous purely as a safety bound.
     const maxSteps = Math.ceil((this.arena.bounds.radius * 4) / SLASH_PREVIEW_MARCH_STEP);
+    const minDist = Enemy.RADIUS + radius;
     for (let i = 0; i < maxSteps; i++) {
-      x += dirX * SLASH_PREVIEW_MARCH_STEP;
-      y += dirY * SLASH_PREVIEW_MARCH_STEP;
+      const nextX = x + dirX * SLASH_PREVIEW_MARCH_STEP;
+      const nextY = y + dirY * SLASH_PREVIEW_MARCH_STEP;
 
-      const dx = x - this.arena.bounds.centerX;
-      const dy = y - this.arena.bounds.centerY;
+      const dx = nextX - this.arena.bounds.centerX;
+      const dy = nextY - this.arena.bounds.centerY;
       const angleAtPoint = Math.atan2(dy, dx);
       const maxDist = this.arena.maxRadiusAtAngle(angleAtPoint) - radius;
       if (Math.hypot(dx, dy) > maxDist) {
         return null;
       }
 
-      const enemy = this.findEnemyBlockingPoint(x, y, radius);
+      // Only exclude on the very first step - a step or two past that, the
+      // ray has genuinely left the excluded enemy's radius (the distance
+      // check above would fail on its own), so it's safe to consider it
+      // hittable again from here on, same as any other enemy.
+      const enemy = this.findEnemyBlockingPoint(nextX, nextY, radius, i === 0 ? excludeEnemy : null);
       if (enemy) {
-        return enemy;
+        const edx = nextX - enemy.x;
+        const edy = nextY - enemy.y;
+        const scale = minDist / Math.hypot(edx, edy);
+        return { enemy, point: { x: enemy.x + edx * scale, y: enemy.y + edy * scale } };
       }
+
+      x = nextX;
+      y = nextY;
     }
     return null;
   }
 
-  /** The first alive enemy whose round body would block a point on the preview's march, or null if none does. */
-  private findEnemyBlockingPoint(x: number, y: number, radius: number): Enemy | null {
+  /** The first alive enemy (other than excludeEnemy) whose round body would block a point on the preview's march, or null if none does. excludeEnemy exists so a step taken right after bouncing off an enemy doesn't immediately re-detect that same body on a grazing hit - see buildPreviewPath's justBouncedEnemy. */
+  private findEnemyBlockingPoint(x: number, y: number, radius: number, excludeEnemy: Enemy | null = null): Enemy | null {
     const minDist = Enemy.RADIUS + radius;
     for (const enemy of this.enemyPool) {
-      if (!enemy.isAlive) {
+      if (!enemy.isAlive || enemy === excludeEnemy) {
         continue;
       }
       const dx = x - enemy.x;
