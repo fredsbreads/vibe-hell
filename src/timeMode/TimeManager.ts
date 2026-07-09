@@ -10,6 +10,8 @@ const ENEMY_SPAWN_INTERVAL_MS = 1500;
 const INITIAL_ENEMY_COUNT = 3;
 /** Rejection-sample radius around the player - keeps a freshly-spawned enemy from appearing right on top of you. */
 const ENEMY_MIN_SPAWN_DIST_FROM_PLAYER = 140;
+/** Rejection-sample radius around every other alive enemy - keeps two enemies from spawning on top of (or touching) each other. Comfortably more than 2x Enemy.RADIUS (28) so they land visibly separated, not just non-overlapping. */
+const ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES = 50;
 const MAX_SPAWN_ATTEMPTS = 20;
 
 const PROJECTILE_POOL_SIZE = 60;
@@ -425,7 +427,7 @@ export class TimeManager {
     this.spawnOneEnemy(playerX, playerY);
   }
 
-  /** Activates one free enemy at a random point in the arena, rejection-sampled to stay at least ENEMY_MIN_SPAWN_DIST_FROM_PLAYER away. No-op if the pool is full or no valid spot is found within MAX_SPAWN_ATTEMPTS. */
+  /** Activates one free enemy at a random point in the arena, rejection-sampled to stay at least ENEMY_MIN_SPAWN_DIST_FROM_PLAYER from the player and ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES from every other alive enemy. No-op if the pool is full or no valid spot is found within MAX_SPAWN_ATTEMPTS. */
   private spawnOneEnemy(playerX: number, playerY: number): void {
     const enemy = this.enemyPool.find((e) => !e.isAlive);
     if (!enemy) {
@@ -439,11 +441,29 @@ export class TimeManager {
       const x = this.arena.bounds.centerX + Math.cos(angle) * dist;
       const y = this.arena.bounds.centerY + Math.sin(angle) * dist;
       const distFromPlayer = Math.hypot(x - playerX, y - playerY);
-      if (distFromPlayer >= ENEMY_MIN_SPAWN_DIST_FROM_PLAYER) {
-        enemy.activate(x, y);
-        return;
+      if (distFromPlayer < ENEMY_MIN_SPAWN_DIST_FROM_PLAYER) {
+        continue;
+      }
+      if (this.isTooCloseToOtherEnemy(x, y)) {
+        continue;
+      }
+      enemy.activate(x, y);
+      return;
+    }
+  }
+
+  private isTooCloseToOtherEnemy(x: number, y: number): boolean {
+    for (const other of this.enemyPool) {
+      if (!other.isAlive) {
+        continue;
+      }
+      const dx = other.x - x;
+      const dy = other.y - y;
+      if (dx * dx + dy * dy < ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES * ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES) {
+        return true;
       }
     }
+    return false;
   }
 
   /**
