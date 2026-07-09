@@ -23,12 +23,17 @@ export class RecordedInputSource implements InputSource {
 
   constructor(private readonly frames: RecordedFrame[]) {}
 
+  /** Whatever frame the next read() will return, without consuming it - lets a caller estimate a step's effect (see TimeMainScene's replay-pacing budget) before committing to actually taking it. Null if nothing was ever recorded. */
+  peekFrame(): RecordedFrame | null {
+    if (this.frames.length === 0) {
+      return null;
+    }
+    return this.frames[Math.min(this.index, this.frames.length - 1)];
+  }
+
   /** The recorded realDelta for whatever frame the next read() will return - the caller should step the rest of the simulation (arena/TimeManager) by this same value, not its own live frame delta, for the same reason described on RecordedFrame.realDelta. Falls back to a nominal 16ms if nothing was recorded at all. */
   get nextDelta(): number {
-    if (this.frames.length === 0) {
-      return 16;
-    }
-    return this.frames[Math.min(this.index, this.frames.length - 1)].realDelta;
+    return this.peekFrame()?.realDelta ?? 16;
   }
 
   get isExhausted(): boolean {

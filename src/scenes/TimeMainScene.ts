@@ -9,6 +9,7 @@ import { MenuOverlay } from "../ui/MenuOverlay";
 import { getShowSlashRangeIndicator, setShowSlashRangeIndicator } from "../config/settings";
 import { RecordedFrame, RecordedInputSource } from "../timeMode/ReplayRecorder";
 import { randomSeed } from "../timeMode/SeededRandom";
+import { computeWorldTimescale } from "../timeMode/worldClock";
 
 type UiState = "playing" | "paused" | "gameOver";
 
@@ -27,23 +28,27 @@ const DEATH_SHAKE_INTENSITY = 0.012;
 const DEATH_FLASH_DURATION_MS = 200;
 
 /**
- * Target amount of world-scaled simulated time (ms) the replay advances per
- * real rendered frame - kept constant so the replay's VISUAL PACE reads as
- * uniformly brisk throughout, unlike the original live run's dilation swings
- * (near-frozen while idle, brisk while moving). updateReplay() processes as
- * many recorded steps as it takes to hit this target each frame - many more
- * during a stretch that was near-frozen live (each step only contributes a
- * sliver of world time), barely more than one during a stretch that was
- * already near full speed. This is purely a PACING knob: every individual
- * step still derives its own worldTimescale from that step's real recorded
- * moveX/moveY (see TimePlayer.update), so the simulation itself - enemy
- * timers, spawns, RNG draws - stays bit-for-bit faithful to what actually
- * happened; only how many of those true steps get crammed into one real
- * frame varies.
+ * Hard cap on recorded steps processed in a single real frame - a pure
+ * safety valve so an extreme near-frozen stretch can't stall a frame; the
+ * per-frame target (see updateReplay) just takes an extra real frame or two
+ * to catch up instead.
  */
-const REPLAY_TARGET_WORLD_MS_PER_FRAME = 48;
-/** Hard cap on recorded steps processed in a single real frame - a pure safety valve so an extreme near-frozen stretch can't stall a frame; the target above just takes an extra real frame or two to catch up instead. */
 const REPLAY_MAX_STEPS_PER_FRAME = 400;
+/**
+ * Ceiling on how much surplus replayWorldTimeBudgetMs is allowed to bank up
+ * (see updateReplay's doc comment for the accumulator itself). Without this,
+ * a long near-frozen stretch (idle steps barely spend anything) can build up
+ * an enormous backlog over many real frames - completely fine while the
+ * recording STAYS idle, but the instant it transitions into a fast-moving
+ * stretch, that whole backlog gets spent at once, visibly teleporting the
+ * replay across the screen in a single frame (each fast step now costs
+ * ~16ms of budget, so a several-hundred-ms backlog drains as dozens of
+ * steps in one frame). Capping the deposit keeps any one frame's catch-up
+ * bounded to a handful of frames' worth - a long idle stretch still gets
+ * compressed hard, just spread across several real frames instead of
+ * detonating into one.
+ */
+const REPLAY_MAX_BUDGET_MS = 50;
 
 /**
  * The time-dilation mode's main scene: endless survival, 1 HP, no wave
@@ -91,6 +96,8 @@ export class TimeMainScene extends Phaser.Scene {
   private replaySource: RecordedInputSource | null = null;
   /** Score shown on the HUD while the death replay is looping - kept separate from enemiesDefeated so the frozen final score in the Game Over menu's subtitle doesn't get overwritten as the replay re-kills the same enemies each loop. */
   private replayEnemiesDefeated = 0;
+  /** Persistent world-scaled-time accumulator driving the replay's pacing - see updateReplay's own doc comment for why this needs to carry a remainder across frames instead of resetting each one. */
+  private replayWorldTimeBudgetMs = 0;
 
   constructor() {
     super("TimeMainScene");
@@ -107,6 +114,7 @@ export class TimeMainScene extends Phaser.Scene {
     this.recordedFrames = [];
     this.replaySource = null;
     this.replayEnemiesDefeated = 0;
+    this.replayWorldTimeBudgetMs = 0;
 
     const arenaBounds: ArenaBounds = { centerX: width / 2, centerY: height / 2, radius: ARENA_RADIUS };
     this.arena = new Arena(arenaBounds, new PolygonArena(arenaBounds, 6, ARENA_ROTATION_RAD_PER_MS));
@@ -180,7 +188,7 @@ export class TimeMainScene extends Phaser.Scene {
     this.menuOverlay.update(delta);
 
     if (this.uiState === "gameOver") {
-      this.updateReplay();
+      this.updateReplay(delta);
       return;
     }
 
@@ -252,32 +260,71 @@ export class TimeMainScene extends Phaser.Scene {
    * player-hit death check), fed by the recorded input stream instead of a
    * live device. World timescale is re-derived from each step's recorded
    * moveX/moveY exactly as it was live (see TimePlayer.update), so this
-   * reproduces the actual run rather than a different one. Processes
-   * recorded steps until REPLAY_TARGET_WORLD_MS_PER_FRAME of world time has
-   * been covered THIS real frame (see its own doc comment for why that's
-   * variable-count rather than a fixed steps-per-frame) - a pure pacing
-   * choice layered on top of a state-faithful replay, not a different
-   * simulation. Loops back to the start (resetForReplayLoop) the instant
-   * either the recording runs out or the player dies again, so it plays
-   * forever behind the (compact, corner-layout) Game Over menu until the
-   * player restarts or leaves.
+   * reproduces the actual run rather than a different one.
+   *
+   * Paces itself against a persistent WORLD-scaled time budget
+   * (replayWorldTimeBudgetMs): every real frame deposits `realDelta` into
+   * it, and each recorded step withdraws its own worldScaledDelta, so the
+   * world-time-per-real-time ratio averages out to exactly 1 (100%) over
+   * time - the same ceiling the live game itself never exceeds (world
+   * timescale always maxes out at 100% - see computeWorldTimescale). It's
+   * an accumulator that carries its remainder (positive OR negative) across
+   * frames, rather than a fresh per-frame target, AND each step is only
+   * taken if doing so leaves the budget closer to zero than deferring it
+   * would (see the peekFrame() check below) - together these mean no single
+   * frame ever knowingly overshoots by a whole extra step just because a
+   * small leftover residual technically still counted as "budget
+   * remaining." A stretch that was already near full speed live needs about
+   * one step per frame to keep the budget roughly even, so it plays back at
+   * ordinary real-time speed; a stretch that was near-frozen live needs many
+   * steps to spend down a budget that's been building up, so it gets
+   * compressed up to (never past) that same real-time pace instead of
+   * showing slow motion. Purely a pacing choice layered on top of a
+   * state-faithful replay - every individual step still derives its own
+   * worldTimescale from that step's real recorded moveX/moveY, so the
+   * simulation itself (enemy timers, spawns, RNG draws) is untouched.
+   *
+   * Loops back to the start (resetForReplayLoop) the instant either the
+   * recording runs out or the player dies again, so it plays forever behind
+   * the (compact, corner-layout) Game Over menu until the player restarts or
+   * leaves.
    */
-  private updateReplay(): void {
+  private updateReplay(realDelta: number): void {
     if (!this.replaySource) {
       return;
     }
 
-    let worldMsCovered = 0;
+    this.replayWorldTimeBudgetMs = Math.min(this.replayWorldTimeBudgetMs + realDelta, REPLAY_MAX_BUDGET_MS);
+
     let steps = 0;
-    while (worldMsCovered < REPLAY_TARGET_WORLD_MS_PER_FRAME && steps < REPLAY_MAX_STEPS_PER_FRAME) {
+    while (steps < REPLAY_MAX_STEPS_PER_FRAME) {
       if (this.replaySource.isExhausted || this.player.isDead) {
         this.resetForReplayLoop();
+      }
+
+      // Round-to-nearest rather than "take a step whenever the budget is
+      // still positive": peek the upcoming step's likely cost and only take
+      // it if doing so leaves the budget CLOSER to zero than deferring it
+      // to next frame would. A plain "budget > 0" guard can overshoot by a
+      // whole step whenever a small positive residual isn't quite enough to
+      // justify one more step but still passes ">0" - this catches that
+      // case (defers the step, letting next frame's deposit absorb the
+      // residual) while still taking every step a large backlog (e.g. after
+      // an idle stretch) obviously needs to catch up.
+      const peeked = this.replaySource.peekFrame();
+      if (peeked) {
+        const estimatedWorldScaledDelta = peeked.realDelta * computeWorldTimescale(peeked.moveX, peeked.moveY);
+        const budgetIfTaken = this.replayWorldTimeBudgetMs - estimatedWorldScaledDelta;
+        if (Math.abs(budgetIfTaken) > Math.abs(this.replayWorldTimeBudgetMs)) {
+          break;
+        }
       }
 
       const stepDelta = this.replaySource.nextDelta;
       this.player.update(stepDelta);
       const worldScaledDelta = stepDelta * this.player.worldTimescale;
       this.arena.update(worldScaledDelta);
+      this.replayWorldTimeBudgetMs -= worldScaledDelta;
 
       const deflectedKills = this.timeManager.update(stepDelta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
       if (deflectedKills > 0) {
@@ -291,7 +338,6 @@ export class TimeMainScene extends Phaser.Scene {
         this.player.takeDamage();
       }
 
-      worldMsCovered += worldScaledDelta;
       steps++;
     }
 
@@ -463,6 +509,7 @@ export class TimeMainScene extends Phaser.Scene {
     this.replaySource = new RecordedInputSource(this.recordedFrames);
     this.player.setInputSource(this.replaySource);
     this.player.setReplaying(true);
+    this.replayWorldTimeBudgetMs = 0;
     this.resetForReplayLoop();
   }
 
