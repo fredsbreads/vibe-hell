@@ -39,6 +39,10 @@ const SLASH_PREVIEW_GAP_LENGTH = 6;
 const SLASH_PREVIEW_PULSE_PERIOD_MS = 260;
 const SLASH_PREVIEW_MIN_ALPHA = 0.55;
 const SLASH_PREVIEW_MAX_ALPHA = 1;
+/** March step (px) used to trace the preview line's path against the arena wall - same mirror-bounce math bounceOffWall() applies per-frame to a real projectile, just walked instantly instead of over several frames. Small enough that the approximate bounce point reads as accurate. */
+const SLASH_PREVIEW_MARCH_STEP = 4;
+/** Safety cap on bounces traced within one preview line - the line is short enough that hitting this in practice would mean a degenerate arena, not normal play. */
+const SLASH_PREVIEW_MAX_BOUNCES = 4;
 
 /**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
@@ -190,18 +194,81 @@ export class TimeManager {
     this.previewGraphic.lineStyle(2, SLASH_PREVIEW_COLOR, alpha);
     this.previewGraphic.strokeCircle(projectile.x, projectile.y, projectile.radius + SLASH_PREVIEW_RING_PADDING);
 
-    const dirX = Math.cos(trajectoryAngle);
-    const dirY = Math.sin(trajectoryAngle);
+    const path = this.buildPreviewPath(projectile.x, projectile.y, trajectoryAngle, projectile.radius);
+    this.drawDashedPath(path);
+  }
+
+  /**
+   * Traces the preview trajectory out to SLASH_PREVIEW_LINE_LENGTH, bending
+   * it off the arena wall (mirror-reflect, same as bounceOffWall()) instead
+   * of letting it run straight through - so a deflect preview near the edge
+   * of the arena shows where the shot would actually go, bounce included,
+   * rather than a line that visually exits the arena. Marches in small
+   * steps rather than solving the wall intersection analytically, since the
+   * arena boundary's distance-per-angle isn't a simple closed form for a
+   * rotating polygon - good enough precision for a cosmetic guide line.
+   */
+  private buildPreviewPath(startX: number, startY: number, angle: number, radius: number): { x: number; y: number }[] {
+    const points: { x: number; y: number }[] = [{ x: startX, y: startY }];
+    let x = startX;
+    let y = startY;
+    let dirX = Math.cos(angle);
+    let dirY = Math.sin(angle);
+    let remaining = SLASH_PREVIEW_LINE_LENGTH;
+    let bounces = 0;
+
+    while (remaining > 0 && bounces <= SLASH_PREVIEW_MAX_BOUNCES) {
+      const step = Math.min(SLASH_PREVIEW_MARCH_STEP, remaining);
+      const nextX = x + dirX * step;
+      const nextY = y + dirY * step;
+
+      const dx = nextX - this.arena.bounds.centerX;
+      const dy = nextY - this.arena.bounds.centerY;
+      const distFromCenter = Math.hypot(dx, dy);
+      const angleAtPoint = Math.atan2(dy, dx);
+      const maxDist = this.arena.maxRadiusAtAngle(angleAtPoint) - radius;
+
+      if (distFromCenter <= maxDist) {
+        x = nextX;
+        y = nextY;
+        remaining -= step;
+        continue;
+      }
+
+      const scale = maxDist / distFromCenter;
+      x = this.arena.bounds.centerX + dx * scale;
+      y = this.arena.bounds.centerY + dy * scale;
+      points.push({ x, y });
+
+      const n = this.arena.normalAtAngle(angleAtPoint);
+      const dot = dirX * n.x + dirY * n.y;
+      dirX -= 2 * dot * n.x;
+      dirY -= 2 * dot * n.y;
+
+      remaining -= step;
+      bounces++;
+    }
+
+    points.push({ x, y });
+    return points;
+  }
+
+  private drawDashedPath(points: { x: number; y: number }[]): void {
     const dashPitch = SLASH_PREVIEW_DASH_LENGTH + SLASH_PREVIEW_GAP_LENGTH;
-    for (let traveled = 0; traveled < SLASH_PREVIEW_LINE_LENGTH; traveled += dashPitch) {
-      const segStart = traveled;
-      const segEnd = Math.min(traveled + SLASH_PREVIEW_DASH_LENGTH, SLASH_PREVIEW_LINE_LENGTH);
-      this.previewGraphic.lineBetween(
-        projectile.x + dirX * segStart,
-        projectile.y + dirY * segStart,
-        projectile.x + dirX * segEnd,
-        projectile.y + dirY * segEnd,
-      );
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const segLength = Math.hypot(b.x - a.x, b.y - a.y);
+      if (segLength === 0) {
+        continue;
+      }
+      const dirX = (b.x - a.x) / segLength;
+      const dirY = (b.y - a.y) / segLength;
+      for (let traveled = 0; traveled < segLength; traveled += dashPitch) {
+        const segStart = traveled;
+        const segEnd = Math.min(traveled + SLASH_PREVIEW_DASH_LENGTH, segLength);
+        this.previewGraphic.lineBetween(a.x + dirX * segStart, a.y + dirY * segStart, a.x + dirX * segEnd, a.y + dirY * segEnd);
+      }
     }
   }
 
