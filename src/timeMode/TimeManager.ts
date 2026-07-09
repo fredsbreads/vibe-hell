@@ -183,10 +183,11 @@ export class TimeManager {
   /**
    * QoL preview: highlights every hostile projectile that a Slash swung
    * RIGHT NOW (previewHitbox) would deflect, plus a dashed line showing the
-   * direction it would fly off in (see the SLASH_PREVIEW_* doc comment).
-   * Null hitbox (Slash not ready) just clears the preview. realDelta drives
-   * the highlight's pulse, independent of world dilation - it's a UI aid,
-   * not part of "the world".
+   * direction it would fly off in (see the SLASH_PREVIEW_* doc comment) -
+   * and every enemy it would kill outright, ring only, since a killed enemy
+   * doesn't fly off anywhere to trace a line for. Null hitbox (Slash not
+   * ready) just clears the preview. realDelta drives the highlight's pulse,
+   * independent of world dilation - it's a UI aid, not part of "the world".
    */
   updateSlashPreview(previewHitbox: SlashHitbox | null, realDelta: number): void {
     this.previewPulseMs += realDelta;
@@ -210,11 +211,25 @@ export class TimeManager {
       }
       this.drawPreviewHighlight(projectile, previewHitbox.angle, alpha);
     }
+
+    for (const enemy of this.enemyPool) {
+      if (!enemy.isAlive) {
+        continue;
+      }
+      if (!this.isWithinSlashArc(enemy.x, enemy.y, Enemy.RADIUS, previewHitbox)) {
+        continue;
+      }
+      this.drawPreviewRing(enemy.x, enemy.y, Enemy.RADIUS, alpha);
+    }
+  }
+
+  private drawPreviewRing(x: number, y: number, radius: number, alpha: number): void {
+    this.previewGraphic.lineStyle(2, SLASH_PREVIEW_COLOR, alpha);
+    this.previewGraphic.strokeCircle(x, y, radius + SLASH_PREVIEW_RING_PADDING);
   }
 
   private drawPreviewHighlight(projectile: TimeProjectile, trajectoryAngle: number, alpha: number): void {
-    this.previewGraphic.lineStyle(2, SLASH_PREVIEW_COLOR, alpha);
-    this.previewGraphic.strokeCircle(projectile.x, projectile.y, projectile.radius + SLASH_PREVIEW_RING_PADDING);
+    this.drawPreviewRing(projectile.x, projectile.y, projectile.radius, alpha);
 
     // Scale the line length by how much faster/slower this particular
     // projectile's post-deflect speed is than the baseline - so a zoomer
