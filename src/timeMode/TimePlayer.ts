@@ -321,19 +321,18 @@ export class TimePlayer {
       this.aimLockFlickArmed = state.stickAimMagnitude < AIM_LOCK_FLICK_RELEASE_MAGNITUDE;
     } else {
       // Same target as last frame - carry the selection forward by WHICH
-      // COURSE (the whole ordered run of enemies it routes through) it
-      // matches, not by raw angle or index. Both the target and the player
-      // are constantly moving, so the exact angle that threads any given
-      // course drifts every single frame even with the stick held
-      // perfectly still - matching by angle against last frame's value
-      // would misread that drift as "the closest candidate changed" and
-      // hop to an unrelated one. Matching by the fullest shared prefix of
-      // enemies instead keeps "still riding the same course" stable (aim
-      // is what adjusts to keep threading it) while a flick is what
-      // actually switches to a different course.
-      const previousChain = this.aimLockCandidates[this.aimLockIndex]?.enemies ?? [];
+      // ENEMIES it routes through, not by raw angle or index. The target
+      // projectile is constantly moving, so the exact angle that reaches
+      // any given enemy drifts every single frame even with the stick
+      // held perfectly still - matching by angle against last frame's
+      // value would misread that drift as "the closest candidate changed"
+      // and hop between candidates on its own. Matching by the primary
+      // enemy instead keeps the selection meaning "still aimed at this
+      // same enemy" while its angle continuously (and correctly) tracks
+      // the projectile's motion.
+      const previousPrimaryEnemy = this.aimLockCandidates[this.aimLockIndex]?.enemies[0] ?? null;
       this.aimLockCandidates = result.candidates;
-      this.aimLockIndex = this.candidateIndexForChain(result.candidates, previousChain, this.aimAngle);
+      this.aimLockIndex = this.candidateIndexForEnemy(result.candidates, previousPrimaryEnemy, this.aimAngle);
     }
 
     if (this.aimLockCandidates.length > 1 && state.stickAimAngle !== null) {
@@ -350,46 +349,19 @@ export class TimePlayer {
     this.aimAngle = this.aimLockCandidates[this.aimLockIndex].angle;
   }
 
-  /**
-   * Whichever candidate shares the longest matching prefix of enemies with
-   * previousChain (see updateAimLock) - an exact full match wins outright
-   * (still exactly the same course), but a candidate that's only lost its
-   * TAIL (still hits the same enemy first, chains differently after) beats
-   * one that's lost the whole thing, so the selection degrades gracefully
-   * rather than jumping to something unrelated the moment the very end of
-   * the chain shifts. Falls back to closest-by-angle only if nothing shares
-   * even the first enemy (the course is genuinely gone - it died, or moved
-   * out of range).
-   */
-  private candidateIndexForChain(
+  /** Whichever candidate's primary enemy matches previousPrimaryEnemy (see updateAimLock) - falling back to closest-by-angle if that enemy isn't in the new list at all (it died, or the candidate band it was part of disappeared as the target moved). */
+  private candidateIndexForEnemy(
     candidates: { angle: number; count: number; enemies: unknown[] }[],
-    previousChain: unknown[],
+    previousPrimaryEnemy: unknown,
     fallbackAngle: number,
   ): number {
-    if (previousChain.length > 0) {
-      let bestIndex = -1;
-      let bestScore = 0;
-      candidates.forEach((candidate, i) => {
-        const score = this.chainMatchScore(candidate.enemies, previousChain);
-        if (score > bestScore) {
-          bestScore = score;
-          bestIndex = i;
-        }
-      });
-      if (bestIndex !== -1) {
-        return bestIndex;
+    if (previousPrimaryEnemy) {
+      const matchIndex = candidates.findIndex((candidate) => candidate.enemies[0] === previousPrimaryEnemy);
+      if (matchIndex !== -1) {
+        return matchIndex;
       }
     }
     return this.closestCandidateIndex(candidates, fallbackAngle);
-  }
-
-  /** Length of the shared leading run between two enemy chains - e.g. [A,B,C] vs [A,B,D] scores 2, [A,B,C] vs [A,X,C] scores 1. */
-  private chainMatchScore(a: unknown[], b: unknown[]): number {
-    let i = 0;
-    while (i < a.length && i < b.length && a[i] === b[i]) {
-      i++;
-    }
-    return i;
   }
 
   private closestCandidateIndex(candidates: { angle: number; count: number }[], angle: number): number {
