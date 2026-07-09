@@ -50,6 +50,16 @@ const SLASH_PREVIEW_MARCH_STEP = 4;
 const SLASH_PREVIEW_MAX_BOUNCES = 4;
 /** Extra length granted to the budget each time the preview path bounces off a wall - without this, a bounce early in the line leaves too little of the length budget for the post-bounce segment to show anything useful. */
 const SLASH_PREVIEW_BOUNCE_BONUS = 40;
+/**
+ * Length budget granted after the path bounces off an ENEMY specifically
+ * (as opposed to a wall) - deliberately generous (enough to cross the whole
+ * arena) rather than the small flat SLASH_PREVIEW_BOUNCE_BONUS. The whole
+ * point of chaining off an enemy is showing whatever else is downstream of
+ * it, and that next enemy can be anywhere in the arena - a short bonus meant
+ * the trace would fizzle out in open space before ever reaching a second
+ * enemy unless the two happened to be very close together.
+ */
+const SLASH_PREVIEW_POST_ENEMY_BOUNCE_REACH = 2000;
 
 /**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
@@ -332,8 +342,12 @@ export class TimeManager {
         dirY -= 2 * dot * ny;
 
         wallBounceBudget = DEFLECT_MAX_WALL_BOUNCES;
-        remaining -= step;
-        remaining += SLASH_PREVIEW_BOUNCE_BONUS;
+        // Generous, not a small flat bonus: the next enemy in the chain can
+        // be anywhere in the arena, so the segment leaving an enemy bounce
+        // needs enough budget to actually reach it (see
+        // SLASH_PREVIEW_POST_ENEMY_BOUNCE_REACH) rather than fizzling out in
+        // open space partway there.
+        remaining = SLASH_PREVIEW_POST_ENEMY_BOUNCE_REACH;
         bounces++;
         continue;
       }

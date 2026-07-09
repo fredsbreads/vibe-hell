@@ -16,9 +16,9 @@ const ESCAPE_MARGIN = 80;
  * instead of guessing when the real projectile would actually die.
  */
 export const DEFLECT_MAX_WALL_BOUNCES = 2;
-/** Matches the game's established teal-unselected/yellow-actionable convention (menus, kill pops): not yet re-deflectable stays teal, becoming re-deflectable (see isReDeflectable) switches to yellow - "you can act on this now." Originally distinguished by kind too, but that's deliberately dropped - only the re-deflectable state matters. */
+/** Not yet re-deflectable stays teal (matches the player's own color); becoming re-deflectable (see isReDeflectable) switches to blue - "you can act on this now." Blue rather than the menu convention's yellow because yellow collides with the straight kind's hostile color (0xf2e85c) - a friendly re-deflectable shot getting mistaken for an incoming hostile one at a glance defeats the point. Originally distinguished by kind too, but that's deliberately dropped - only the re-deflectable state matters. */
 const DEFLECT_TINT = 0x59f2c8;
-const DEFLECT_REDEFLECTABLE_TINT = 0xffe98a;
+const DEFLECT_REDEFLECTABLE_TINT = 0x4d9fff;
 /** Deflected projectiles fly faster than the hostile speed they arrived at, on top of the real-time burst - reads as more dangerous/decisive, and outruns the enemy that fired it in the first place. */
 const DEFLECT_SPEED_MULTIPLIER = 1.6;
 
