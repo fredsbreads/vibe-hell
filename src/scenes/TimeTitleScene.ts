@@ -17,7 +17,6 @@ export class TimeTitleScene extends Phaser.Scene {
   private titleText!: Phaser.GameObjects.Text;
   private playButton!: Phaser.GameObjects.Text;
   private optionsButton!: Phaser.GameObjects.Text;
-  private navHintText!: Phaser.GameObjects.Text;
 
   /** Which of [PLAY, OPTIONS] Up/Down/D-Pad/Stick navigation currently highlights - the single source of truth Confirm acts on, so keyboard/gamepad play can actually reach OPTIONS (previously Confirm always started the game outright, with no way to navigate onto OPTIONS without already knowing the O/Triangle shortcut). Mouse clicks on either button still work directly regardless of this. */
   private titleFocusedIndex: 0 | 1 = 0;
@@ -75,15 +74,6 @@ export class TimeTitleScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     this.optionsButton.on("pointerdown", () => this.openOptions());
     this.optionsButton.on("pointerover", () => this.setTitleFocus(1));
-
-    this.navHintText = this.add
-      .text(width / 2, height / 2 + 130, "Up/Down or D-Pad/Stick to select  ·  Enter/Cross confirm", {
-        fontFamily: "monospace",
-        fontSize: "12px",
-        color: "#6a6a80",
-        align: "center",
-      })
-      .setOrigin(0.5);
 
     this.menuOverlay = new MenuOverlay(this, width, height);
 
@@ -191,7 +181,6 @@ export class TimeTitleScene extends Phaser.Scene {
     this.titleText.setVisible(false);
     this.playButton.setVisible(false);
     this.optionsButton.setVisible(false);
-    this.navHintText.setVisible(false);
     const pad = this.input.gamepad?.pad1;
     const stickY = pad?.leftStick.y ?? 0;
     // Resync so whatever button opened this (Enter/O/Triangle) doesn't also
@@ -221,7 +210,6 @@ export class TimeTitleScene extends Phaser.Scene {
     this.titleText.setVisible(true);
     this.playButton.setVisible(true);
     this.optionsButton.setVisible(true);
-    this.navHintText.setVisible(true);
     // Whichever button was focused before OPTIONS was reached (mouse hover,
     // D-Pad, or the O/Triangle shortcut, which doesn't touch focus at all)
     // might not match titleFocusedIndex's highlight anymore visually - resync.
