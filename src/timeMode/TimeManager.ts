@@ -395,7 +395,7 @@ export class TimeManager {
     referenceAngle: number,
     range: number,
     arcWidth: number,
-  ): { target: TimeProjectile; candidates: { angle: number; count: number }[] } | null {
+  ): { target: TimeProjectile; candidates: { angle: number; count: number; enemies: Enemy[] }[] } | null {
     let target = currentTarget;
     if (target && (!target.active || (target.deflected && !target.isReDeflectable))) {
       target = null;
@@ -418,10 +418,20 @@ export class TimeManager {
    * angles (not one entry per fine-grained sample - buildChainHops'
    * underlying geometry is a step function, so a real bounce opportunity is
    * a whole plateau of angles, not a single point). Each band collapses to
-   * the angle at its own peak count, averaged across ties so a flat
-   * plateau's candidate sits centered in it rather than at whichever edge
-   * the scan happened to reach first. Sorted by angle so index order
-   * matches physical left-to-right/clockwise order for cycling through.
+   * the angle at its own peak count, at the single sample closest to the
+   * plateau's center (not an angle-average across ties - target is
+   * constantly moving, so a plateau's exact extent shifts every frame, and
+   * averaging across however many samples happened to tie for the peak
+   * this particular frame made the "center" itself noisy frame to frame in
+   * a way picking one well-centered sample doesn't). Sorted by angle so
+   * index order matches physical left-to-right/clockwise order for cycling
+   * through.
+   *
+   * Each candidate also carries the ordered list of enemies its peak sample
+   * actually hits (see resolveChain) - since target keeps moving, the exact
+   * angle for "the same conceptual candidate" (same downstream enemies)
+   * drifts continuously frame to frame, so callers should track a
+   * selection by comparing this enemy list, not by re-matching on angle.
    */
   private findChainCandidateAngles(
     playerX: number,
@@ -429,7 +439,7 @@ export class TimeManager {
     target: TimeProjectile,
     range: number,
     arcWidth: number,
-  ): { angle: number; count: number }[] {
+  ): { angle: number; count: number; enemies: Enemy[] }[] {
     const angleToTarget = Math.atan2(target.y - playerY, target.x - playerX);
     const dist = Math.hypot(target.x - playerX, target.y - playerY);
     const angularRadius = dist > 0 ? Math.asin(Math.min(1, target.radius / dist)) : Math.PI;
@@ -444,7 +454,7 @@ export class TimeManager {
       samples.push({ angle: a, count: this.countChainedHits(target, a) });
     }
 
-    const candidates: { angle: number; count: number }[] = [];
+    const candidates: { angle: number; count: number; enemies: Enemy[] }[] = [];
     let i = 0;
     while (i < samples.length) {
       if (samples[i].count < 2) {
@@ -457,29 +467,39 @@ export class TimeManager {
         peakCount = Math.max(peakCount, samples[j].count);
         j++;
       }
-      let angleSum = 0;
-      let peakSampleCount = 0;
+      let peakStart = -1;
+      let peakEnd = -1;
       for (let k = i; k < j; k++) {
         if (samples[k].count === peakCount) {
-          angleSum += samples[k].angle;
-          peakSampleCount++;
+          if (peakStart === -1) {
+            peakStart = k;
+          }
+          peakEnd = k;
         }
       }
-      candidates.push({ angle: angleSum / peakSampleCount, count: peakCount });
+      const centerSample = samples[Math.round((peakStart + peakEnd) / 2)];
+      candidates.push({ angle: centerSample.angle, count: peakCount, enemies: this.resolveChain(target, centerSample.angle) });
       i = j;
     }
     return candidates;
   }
 
-  /** Total enemies a deflect off projectile at the given angle would hit: whatever the (short, cosmetic) primary line reaches directly, plus however far the chain-hop lookahead extends beyond that. Mirrors drawPreviewHighlight's own math exactly, so the snap search can never "find" a bounce the preview/real deflect wouldn't also show. */
-  private countChainedHits(projectile: TimeProjectile, angle: number): number {
+  /** Every enemy a deflect off projectile at the given angle would hit, in order: whatever the (short, cosmetic) primary line reaches directly, followed by however far the chain-hop lookahead extends beyond that. Mirrors drawPreviewHighlight's own math exactly, so nothing here can "find" a bounce the preview/real deflect wouldn't also show. The ordered identity of this list (particularly its first entry - the primary target) is what findChainCandidateAngles uses to recognize "the same candidate" across frames even as the moving projectile shifts exactly which angle achieves it - see AimAssist.findChainLock. */
+  private resolveChain(projectile: TimeProjectile, angle: number): Enemy[] {
     const lineLength = this.previewLineLength(projectile);
     const { hitEnemies, lastBounce } = this.buildPreviewPath(projectile.x, projectile.y, angle, projectile.radius, lineLength);
-    let count = hitEnemies.length;
+    const enemies = [...hitEnemies];
     if (lastBounce && lastBounce.wasEnemy) {
-      count += this.buildChainHops(lastBounce.x, lastBounce.y, lastBounce.dirX, lastBounce.dirY, projectile.radius, lastBounce.enemy).length;
+      for (const hop of this.buildChainHops(lastBounce.x, lastBounce.y, lastBounce.dirX, lastBounce.dirY, projectile.radius, lastBounce.enemy)) {
+        enemies.push(hop.enemy);
+      }
     }
-    return count;
+    return enemies;
+  }
+
+  /** Total enemies a deflect off projectile at the given angle would hit - see resolveChain. */
+  private countChainedHits(projectile: TimeProjectile, angle: number): number {
+    return this.resolveChain(projectile, angle).length;
   }
 
   private drawPreviewRing(x: number, y: number, radius: number, alpha: number): void {
