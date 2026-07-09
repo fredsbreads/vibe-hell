@@ -16,9 +16,9 @@ const ESCAPE_MARGIN = 80;
  * instead of guessing when the real projectile would actually die.
  */
 export const DEFLECT_MAX_WALL_BOUNCES = 2;
-/** Not yet re-deflectable stays teal (matches the player's own color); becoming re-deflectable (see isReDeflectable) switches to blue - "you can act on this now." Blue rather than the menu convention's yellow because yellow collides with the straight kind's hostile color (0xf2e85c) - a friendly re-deflectable shot getting mistaken for an incoming hostile one at a glance defeats the point. Originally distinguished by kind too, but that's deliberately dropped - only the re-deflectable state matters. */
-const DEFLECT_TINT = 0x59f2c8;
-const DEFLECT_REDEFLECTABLE_TINT = 0x4d9fff;
+/** Not yet re-deflectable (locked) is dark blue; becoming re-deflectable (see isReDeflectable) switches to teal (matches the player's own color) - "you can act on this now." Blue rather than the menu convention's yellow for the ready state would collide with the straight kind's hostile color (0xf2e85c) - a friendly re-deflectable shot getting mistaken for an incoming hostile one at a glance defeats the point. Originally distinguished by kind too, but that's deliberately dropped - only the re-deflectable state matters. */
+const DEFLECT_LOCKED_TINT = 0x4d9fff;
+const DEFLECT_REDEFLECTABLE_TINT = 0x59f2c8;
 /** Deflected projectiles fly faster than the hostile speed they arrived at, on top of the real-time burst - reads as more dangerous/decisive, and outruns the enemy that fired it in the first place. */
 const DEFLECT_SPEED_MULTIPLIER = 1.6;
 
@@ -194,12 +194,12 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     return this.speed * DEFLECT_SPEED_MULTIPLIER;
   }
 
-  /** The tint the sprite/tail should currently show - hostile is its own kind color, deflected-but-not-yet-redeflectable is teal, redeflectable is yellow. Single source of truth so the sprite tint and the tail color can never disagree. */
+  /** The tint the sprite/tail should currently show - hostile is its own kind color, deflected-but-not-yet-redeflectable (locked) is dark blue, redeflectable is teal. Single source of truth so the sprite tint and the tail color can never disagree. */
   private get currentTintColor(): number {
     if (!this.isDeflected) {
       return this.baseColor;
     }
-    return this.isReDeflectable ? DEFLECT_REDEFLECTABLE_TINT : DEFLECT_TINT;
+    return this.isReDeflectable ? DEFLECT_REDEFLECTABLE_TINT : DEFLECT_LOCKED_TINT;
   }
 
   /**
