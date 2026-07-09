@@ -54,6 +54,10 @@ const SLASH_PREVIEW_BOUNCE_BONUS = 40;
 const SLASH_PREVIEW_CHAIN_STUB_LENGTH = 26;
 /** Safety cap on how many enemy-to-enemy hops the chain lookahead will follow beyond the primary line - the chain is stopped for real by the first wall bounce or by running out of alive enemies long before this, this just guards against a degenerate arrangement of enemies bouncing back and forth forever. */
 const SLASH_PREVIEW_MAX_CHAIN_HOPS = 6;
+/** How far (rad, each direction) the aim-snap search looks around the player's raw aim for a nearby angle that chains into an extra enemy - see computeSnappedAimAngle. Comfortably inside SLASH_ARC_WIDTH/2 so a snapped angle can't aim the swing at a completely different projectile than the one the player was actually pointing at. */
+const SLASH_SNAP_SEARCH_HALF_WIDTH = 0.22;
+/** Angle step (rad) the aim-snap search samples at - fine enough that the snapped angle reads as landing right on the real bounce, not visibly short of it. */
+const SLASH_SNAP_SEARCH_STEP = 0.01;
 
 /**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
@@ -235,9 +239,95 @@ export class TimeManager {
     }
   }
 
+  /**
+   * Aim assist: the exact angle that chains a deflect into an additional
+   * enemy is often only a fraction of a degree wide (see buildChainHops) -
+   * far too tight to reliably hit by feel. If there's a projectile in slash
+   * range near rawAngle, and some nearby angle within
+   * SLASH_SNAP_SEARCH_HALF_WIDTH would send it into MORE enemies (primary
+   * hit(s) plus chain hops) than rawAngle itself achieves, snap to whichever
+   * such angle is closest to rawAngle instead. Recomputed fresh every frame
+   * from the player's current raw aim (not any previous snapped value), so
+   * as the player sweeps their aim across a cluster of nearby good angles,
+   * "closest to rawAngle" naturally slides from one to the next rather than
+   * sticking or jumping - exactly the "snap from one to the other" the
+   * player asked for. Returns rawAngle unchanged if nothing nearby improves
+   * on it (including when nothing is in range to snap to at all).
+   */
+  computeSnappedAimAngle(playerX: number, playerY: number, rawAngle: number, range: number, arcWidth: number): number {
+    const rawHitbox: SlashHitbox = { x: playerX, y: playerY, angle: rawAngle, range, arcWidth, swingId: -1 };
+    const projectile = this.findSnapTargetProjectile(playerX, playerY, rawAngle, rawHitbox);
+    if (!projectile) {
+      return rawAngle;
+    }
+
+    const rawCount = this.countChainedHits(projectile, rawAngle);
+    let bestAngle = rawAngle;
+    let bestCount = rawCount;
+    let bestDist = Infinity;
+
+    for (let offset = -SLASH_SNAP_SEARCH_HALF_WIDTH; offset <= SLASH_SNAP_SEARCH_HALF_WIDTH; offset += SLASH_SNAP_SEARCH_STEP) {
+      const angle = rawAngle + offset;
+      const hitbox: SlashHitbox = { x: playerX, y: playerY, angle, range, arcWidth, swingId: -1 };
+      if (!this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, hitbox)) {
+        continue;
+      }
+      const count = this.countChainedHits(projectile, angle);
+      const dist = Math.abs(offset);
+      if (count > bestCount || (count === bestCount && dist < bestDist)) {
+        bestCount = count;
+        bestAngle = angle;
+        bestDist = dist;
+      }
+    }
+
+    return bestCount > rawCount ? bestAngle : rawAngle;
+  }
+
+  /** The projectile rawAngle would actually deflect right now (same eligibility as checkSlashHits/updateSlashPreview), preferring whichever one is most centered in the arc - the aim-snap search only makes sense relative to a specific projectile's position. */
+  private findSnapTargetProjectile(playerX: number, playerY: number, rawAngle: number, rawHitbox: SlashHitbox): TimeProjectile | null {
+    let best: TimeProjectile | null = null;
+    let bestAngleDist = Infinity;
+    for (const projectile of this.projectilePool) {
+      if (!projectile.active) {
+        continue;
+      }
+      if (projectile.deflected && !projectile.isReDeflectable) {
+        continue;
+      }
+      if (!this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, rawHitbox)) {
+        continue;
+      }
+      const angleToProjectile = Math.atan2(projectile.y - playerY, projectile.x - playerX);
+      const angleDist = Math.abs(Phaser.Math.Angle.Wrap(angleToProjectile - rawAngle));
+      if (angleDist < bestAngleDist) {
+        bestAngleDist = angleDist;
+        best = projectile;
+      }
+    }
+    return best;
+  }
+
+  /** Total enemies a deflect off projectile at the given angle would hit: whatever the (short, cosmetic) primary line reaches directly, plus however far the chain-hop lookahead extends beyond that. Mirrors drawPreviewHighlight's own math exactly, so the snap search can never "find" a bounce the preview/real deflect wouldn't also show. */
+  private countChainedHits(projectile: TimeProjectile, angle: number): number {
+    const lineLength = this.previewLineLength(projectile);
+    const { hitEnemies, lastBounce } = this.buildPreviewPath(projectile.x, projectile.y, angle, projectile.radius, lineLength);
+    let count = hitEnemies.length;
+    if (lastBounce && lastBounce.wasEnemy) {
+      count += this.buildChainHops(lastBounce.x, lastBounce.y, lastBounce.dirX, lastBounce.dirY, projectile.radius, lastBounce.enemy).length;
+    }
+    return count;
+  }
+
   private drawPreviewRing(x: number, y: number, radius: number, alpha: number): void {
     this.previewGraphic.lineStyle(2, SLASH_PREVIEW_COLOR, alpha);
     this.previewGraphic.strokeCircle(x, y, radius + SLASH_PREVIEW_RING_PADDING);
+  }
+
+  /** Trajectory-line length for a given projectile's post-deflect speed - see SLASH_PREVIEW_BASE_LINE_LENGTH. Shared by the drawn preview and the aim-snap chain search so both agree on exactly how far a deflect off this projectile would actually reach. */
+  private previewLineLength(projectile: TimeProjectile): number {
+    const speedRatio = projectile.deflectSpeed / BASE_DEFLECT_SPEED;
+    return Phaser.Math.Clamp(SLASH_PREVIEW_BASE_LINE_LENGTH * speedRatio, SLASH_PREVIEW_MIN_LINE_LENGTH, SLASH_PREVIEW_MAX_LINE_LENGTH);
   }
 
   private drawPreviewHighlight(projectile: TimeProjectile, trajectoryAngle: number, alpha: number): void {
@@ -246,12 +336,7 @@ export class TimeManager {
     // Scale the line length by how much faster/slower this particular
     // projectile's post-deflect speed is than the baseline - so a zoomer
     // (2x speed, 2x deflectSpeed) telegraphs with a visibly longer line.
-    const speedRatio = projectile.deflectSpeed / BASE_DEFLECT_SPEED;
-    const lineLength = Phaser.Math.Clamp(
-      SLASH_PREVIEW_BASE_LINE_LENGTH * speedRatio,
-      SLASH_PREVIEW_MIN_LINE_LENGTH,
-      SLASH_PREVIEW_MAX_LINE_LENGTH,
-    );
+    const lineLength = this.previewLineLength(projectile);
 
     const { path, hitEnemies, lastBounce } = this.buildPreviewPath(
       projectile.x,
