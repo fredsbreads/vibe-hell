@@ -247,8 +247,14 @@ export class TimeManager {
       SLASH_PREVIEW_MAX_LINE_LENGTH,
     );
 
-    const path = this.buildPreviewPath(projectile.x, projectile.y, trajectoryAngle, projectile.radius, lineLength);
+    const { path, hitEnemies } = this.buildPreviewPath(projectile.x, projectile.y, trajectoryAngle, projectile.radius, lineLength);
     this.drawDashedPath(path);
+    // Any enemy further down the chain also gets the same ring the primary
+    // target does - "this too is on the path and would get hit", not just
+    // the very first thing in slash range right now.
+    for (const enemy of hitEnemies) {
+      this.drawPreviewRing(enemy.x, enemy.y, Enemy.RADIUS, alpha);
+    }
   }
 
   /**
@@ -272,9 +278,26 @@ export class TimeManager {
    * analytically, since the arena boundary's distance-per-angle isn't a
    * simple closed form for a rotating polygon anyway - good enough
    * precision for a cosmetic guide line.
+   *
+   * Also collects every enemy the path bounces off (hitEnemies) - the
+   * caller rings each of those too, not just the very first thing in slash
+   * range right now, so "this is also on the path and would get hit" is
+   * visible as far down the chain as the trace goes. Deliberately doesn't
+   * do the same for hostile projectiles: they don't redirect the path (no
+   * bounce happens there, it just destroys them and keeps flying straight),
+   * and unlike a stationary enemy they're actively moving, so a "will this
+   * still be here when the real shot arrives" prediction would be far less
+   * reliable - not worth the complexity for markers that could easily lie.
    */
-  private buildPreviewPath(startX: number, startY: number, angle: number, radius: number, lineLength: number): { x: number; y: number }[] {
+  private buildPreviewPath(
+    startX: number,
+    startY: number,
+    angle: number,
+    radius: number,
+    lineLength: number,
+  ): { path: { x: number; y: number }[]; hitEnemies: Enemy[] } {
     const points: { x: number; y: number }[] = [{ x: startX, y: startY }];
+    const hitEnemies: Enemy[] = [];
     let x = startX;
     let y = startY;
     let dirX = Math.cos(angle);
@@ -298,6 +321,7 @@ export class TimeManager {
         x = blockingEnemy.x + dx * scale;
         y = blockingEnemy.y + dy * scale;
         points.push({ x, y });
+        hitEnemies.push(blockingEnemy);
 
         const nx = dx / distFromEnemy;
         const ny = dy / distFromEnemy;
@@ -348,7 +372,7 @@ export class TimeManager {
     }
 
     points.push({ x, y });
-    return points;
+    return { path: points, hitEnemies };
   }
 
   /** The first alive enemy whose round body would block a point on the preview's march, or null if none does. */
