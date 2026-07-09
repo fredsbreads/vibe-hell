@@ -23,6 +23,12 @@ const SLASH_COLOR = 0xf2e85c;
 /** How far (0-1) into the swing the flash-white tint finishes fading to SLASH_COLOR - just the first slice of the swing reads as a flash. */
 const SLASH_FLASH_PORTION = 0.25;
 
+/** A persistent, unobtrusive outline of the exact wedge Slash would hit right now - so "is this actually in range" is answerable by eye, not guesswork. Brighter/more visible when Slash is actually ready, faint while on cooldown. */
+const SLASH_RANGE_READY_COLOR = 0x59f2c8;
+const SLASH_RANGE_COOLDOWN_COLOR = 0x6a6a80;
+const SLASH_RANGE_READY_ALPHA = 0.35;
+const SLASH_RANGE_COOLDOWN_ALPHA = 0.12;
+
 export interface SlashHitbox {
   x: number;
   y: number;
@@ -58,6 +64,7 @@ export class TimePlayer {
   private readonly input: PlayerInput;
   private readonly aimIndicator: Phaser.GameObjects.Graphics;
   private readonly slashGraphic: Phaser.GameObjects.Graphics;
+  private readonly slashRangeGraphic: Phaser.GameObjects.Graphics;
 
   private isDashing = false;
   private dashTimeRemainingMs = 0;
@@ -85,6 +92,7 @@ export class TimePlayer {
 
     this.aimIndicator = scene.add.graphics();
     this.slashGraphic = scene.add.graphics();
+    this.slashRangeGraphic = scene.add.graphics();
   }
 
   /** The world timescale computed from this frame's raw stick input - read this AFTER calling update(), and use it to step everything else ("the world") this same frame. */
@@ -137,6 +145,7 @@ export class TimePlayer {
 
     this.clampToArena();
     this.redrawAimIndicator();
+    this.redrawSlashRangeIndicator();
   }
 
   private get position(): { x: number; y: number } {
@@ -297,6 +306,32 @@ export class TimePlayer {
     this.slashGraphic.beginPath();
     this.slashGraphic.arc(this.position.x, this.position.y, SLASH_RANGE, this.slashAngle - SLASH_ARC_WIDTH / 2, this.slashAngle + SLASH_ARC_WIDTH / 2);
     this.slashGraphic.strokePath();
+  }
+
+  /**
+   * A persistent wedge outline (arc + two radial lines back to the player)
+   * showing exactly the region a Slash would hit if triggered this instant -
+   * same range/arc-width/current-aim math getPreviewSlashHitbox() and the
+   * actual swing both use, so this can never disagree with what's really
+   * slashable. Drawn every frame regardless of swing state; brighter when
+   * Slash is actually ready, faint while on cooldown.
+   */
+  private redrawSlashRangeIndicator(): void {
+    this.slashRangeGraphic.clear();
+    const ready = this.canSlash();
+    const color = ready ? SLASH_RANGE_READY_COLOR : SLASH_RANGE_COOLDOWN_COLOR;
+    const alpha = ready ? SLASH_RANGE_READY_ALPHA : SLASH_RANGE_COOLDOWN_ALPHA;
+    const { x, y } = this.position;
+    const startAngle = this.aimAngle - SLASH_ARC_WIDTH / 2;
+    const endAngle = this.aimAngle + SLASH_ARC_WIDTH / 2;
+
+    this.slashRangeGraphic.lineStyle(1.5, color, alpha);
+    this.slashRangeGraphic.beginPath();
+    this.slashRangeGraphic.arc(x, y, SLASH_RANGE, startAngle, endAngle);
+    this.slashRangeGraphic.strokePath();
+
+    this.slashRangeGraphic.lineBetween(x, y, x + Math.cos(startAngle) * SLASH_RANGE, y + Math.sin(startAngle) * SLASH_RANGE);
+    this.slashRangeGraphic.lineBetween(x, y, x + Math.cos(endAngle) * SLASH_RANGE, y + Math.sin(endAngle) * SLASH_RANGE);
   }
 
   /** Dash lockout and Slash cooldown tick on world-scaled time; everything else about the player stays on real time (see class doc comment). */
