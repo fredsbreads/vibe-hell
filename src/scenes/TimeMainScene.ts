@@ -27,17 +27,23 @@ const DEATH_SHAKE_INTENSITY = 0.012;
 const DEATH_FLASH_DURATION_MS = 200;
 
 /**
- * How many recorded frames the replay steps through per real rendered frame -
- * uniformly fast-forwards the whole simulation (world included) rather than
- * playing it back 1:1, so watching a whole run doesn't take as long as
- * playing it did. Deliberately the ONLY thing that makes the replay run
- * faster than the original - world timescale itself is always re-derived
- * from the recorded moveX/moveY each step (see TimePlayer.update), the exact
- * same as it was live, so the replay reproduces the actual run (same enemy
- * spawns/timing/RNG draws) rather than a different run that only shares a
- * seed and a start position.
+ * Target amount of world-scaled simulated time (ms) the replay advances per
+ * real rendered frame - kept constant so the replay's VISUAL PACE reads as
+ * uniformly brisk throughout, unlike the original live run's dilation swings
+ * (near-frozen while idle, brisk while moving). updateReplay() processes as
+ * many recorded steps as it takes to hit this target each frame - many more
+ * during a stretch that was near-frozen live (each step only contributes a
+ * sliver of world time), barely more than one during a stretch that was
+ * already near full speed. This is purely a PACING knob: every individual
+ * step still derives its own worldTimescale from that step's real recorded
+ * moveX/moveY (see TimePlayer.update), so the simulation itself - enemy
+ * timers, spawns, RNG draws - stays bit-for-bit faithful to what actually
+ * happened; only how many of those true steps get crammed into one real
+ * frame varies.
  */
-const REPLAY_STEPS_PER_FRAME = 3;
+const REPLAY_TARGET_WORLD_MS_PER_FRAME = 48;
+/** Hard cap on recorded steps processed in a single real frame - a pure safety valve so an extreme near-frozen stretch can't stall a frame; the target above just takes an extra real frame or two to catch up instead. */
+const REPLAY_MAX_STEPS_PER_FRAME = 400;
 
 /**
  * The time-dilation mode's main scene: endless survival, 1 HP, no wave
@@ -245,20 +251,25 @@ export class TimeMainScene extends Phaser.Scene {
    * run used (player/arena/timeManager update, slash-hit resolution,
    * player-hit death check), fed by the recorded input stream instead of a
    * live device. World timescale is re-derived from each step's recorded
-   * moveX/moveY exactly as it was live (see TimePlayer.update) - the only
-   * thing sped up is wall-clock playback (REPLAY_STEPS_PER_FRAME), so this
-   * reproduces the actual run rather than a different one. Steps
-   * REPLAY_STEPS_PER_FRAME recorded frames per real render, and loops back
-   * to the start (resetForReplayLoop) the instant either the recording runs
-   * out or the player dies again, so it plays forever behind the (compact,
-   * corner-layout) Game Over menu until the player restarts or leaves.
+   * moveX/moveY exactly as it was live (see TimePlayer.update), so this
+   * reproduces the actual run rather than a different one. Processes
+   * recorded steps until REPLAY_TARGET_WORLD_MS_PER_FRAME of world time has
+   * been covered THIS real frame (see its own doc comment for why that's
+   * variable-count rather than a fixed steps-per-frame) - a pure pacing
+   * choice layered on top of a state-faithful replay, not a different
+   * simulation. Loops back to the start (resetForReplayLoop) the instant
+   * either the recording runs out or the player dies again, so it plays
+   * forever behind the (compact, corner-layout) Game Over menu until the
+   * player restarts or leaves.
    */
   private updateReplay(): void {
     if (!this.replaySource) {
       return;
     }
 
-    for (let i = 0; i < REPLAY_STEPS_PER_FRAME; i++) {
+    let worldMsCovered = 0;
+    let steps = 0;
+    while (worldMsCovered < REPLAY_TARGET_WORLD_MS_PER_FRAME && steps < REPLAY_MAX_STEPS_PER_FRAME) {
       if (this.replaySource.isExhausted || this.player.isDead) {
         this.resetForReplayLoop();
       }
@@ -279,6 +290,9 @@ export class TimeMainScene extends Phaser.Scene {
       if (!this.player.isInvincible && this.timeManager.checkPlayerHit(this.player.sprite.x, this.player.sprite.y, TimePlayer.RADIUS)) {
         this.player.takeDamage();
       }
+
+      worldMsCovered += worldScaledDelta;
+      steps++;
     }
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.replayEnemiesDefeated}`);
