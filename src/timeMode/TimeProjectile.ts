@@ -3,8 +3,19 @@ import { Arena } from "../arena/Arena";
 
 const ESCAPE_MARGIN = 80;
 
-/** How many times a deflected projectile can bounce off the wall before despawning - same cap the original game's deflect used. */
-const DEFLECT_MAX_BOUNCES = 3;
+/**
+ * A deflected projectile survives exactly one wall bounce, then despawns on
+ * the next one - but landing on an enemy (bounceOffPoint) refreshes that
+ * budget back to full. So a deflected shot can chain through enemies
+ * indefinitely, but the moment it goes two wall bounces in a row without an
+ * enemy kill in between, it's gone after that second one. (Set to 2, not 1:
+ * the count increments ON a bounce and the despawn check reads
+ * count >= this value right after, so "survive 1, die on the 2nd" needs the
+ * threshold one higher than the number of bounces actually survived.)
+ * Exported so the slash-deflect preview can trace the exact same rule
+ * instead of guessing when the real projectile would actually die.
+ */
+export const DEFLECT_MAX_WALL_BOUNCES = 2;
 const DEFLECT_TINT = 0x59f2c8;
 /** Deflected projectiles fly faster than the hostile speed they arrived at, on top of the real-time burst - reads as more dangerous/decisive, and outruns the enemy that fired it in the first place. */
 const DEFLECT_SPEED_MULTIPLIER = 1.6;
@@ -89,7 +100,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private vx = 0;
   private vy = 0;
   private isDeflected = false;
-  private deflectedBounceCount = 0;
+  private wallBounceCount = 0;
   private deflectBurstRemainingMs = 0;
 
   /** Recent velocity headings (radians), oldest first, sampled every TAIL_SEGMENT_LENGTH of travel - see the TAIL_LENGTH doc comment above. */
@@ -114,7 +125,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.vx = Math.cos(aimAngle) * this.speed;
     this.vy = Math.sin(aimAngle) * this.speed;
     this.isDeflected = false;
-    this.deflectedBounceCount = 0;
+    this.wallBounceCount = 0;
     this.deflectBurstRemainingMs = 0;
     this.headingHistory.length = 0;
     this.headingHistory.push(aimAngle);
@@ -144,7 +155,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   /** Redirects along the player's aim angle at a boosted speed (see DEFLECT_SPEED_MULTIPLIER) - friendly from here on, with a brief real-time burst before it starts being world-time-scaled. Also ends any chasing/ricochet behavior immediately (see step()/bounceOffWall()), regardless of its original kind. */
   deflect(aimAngle: number): void {
     this.isDeflected = true;
-    this.deflectedBounceCount = 0;
+    this.wallBounceCount = 0;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
     const deflectSpeed = this.deflectSpeed;
     this.vx = Math.cos(aimAngle) * deflectSpeed;
@@ -158,9 +169,11 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
    * from that center straight through this projectile's current position
    * instead of the arena's edge normal - the reflection angle depends on
    * exactly where on the circle it hit, same as any round-body bounce would.
-   * Counts toward the same DEFLECT_MAX_BOUNCES budget as a wall bounce - the
-   * caller (TimeManager) is responsible for actually killing the enemy this
-   * bounced off of; this only handles the projectile's own redirect.
+   * Refreshes the wall-bounce budget back to full instead of consuming it -
+   * enemy bounces themselves are unlimited, and landing one buys another
+   * wall bounce. The caller (TimeManager) is responsible for actually
+   * killing the enemy this bounced off of; this only handles the
+   * projectile's own redirect.
    */
   bounceOffPoint(centerX: number, centerY: number): void {
     const dx = this.x - centerX;
@@ -176,7 +189,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.vy -= 2 * dot * ny;
 
     if (this.isDeflected) {
-      this.deflectedBounceCount++;
+      this.wallBounceCount = 0;
     }
   }
 
@@ -210,7 +223,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.sampleHeading(moveDist);
     this.redrawTail();
 
-    if (this.isDeflected && this.deflectedBounceCount >= DEFLECT_MAX_BOUNCES) {
+    if (this.isDeflected && this.wallBounceCount >= DEFLECT_MAX_WALL_BOUNCES) {
       return true;
     }
 
@@ -282,7 +295,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     }
 
     if (this.isDeflected) {
-      this.deflectedBounceCount++;
+      this.wallBounceCount++;
     }
   }
 

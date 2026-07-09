@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { Arena } from "../arena/Arena";
 import { Enemy } from "./Enemy";
-import { TimeProjectile, ProjectileKind, BASE_DEFLECT_SPEED } from "./TimeProjectile";
+import { TimeProjectile, ProjectileKind, BASE_DEFLECT_SPEED, DEFLECT_MAX_WALL_BOUNCES } from "./TimeProjectile";
 import { SlashHitbox } from "./TimePlayer";
 import { spawnPop } from "../effects/spawnPop";
 
@@ -58,8 +58,11 @@ const SLASH_PREVIEW_BOUNCE_BONUS = 40;
  * through an enemy it also kills but additionally bounces off (round body,
  * so the angle depends on exactly where it hit - see
  * TimeProjectile.bounceOffPoint), continuing to fly rather than stopping
- * there; a still-hostile projectile touching the player is instant death
- * (touching an enemy's body is not).
+ * there. A deflected projectile only survives ONE wall bounce, but bouncing
+ * off an enemy refreshes that budget - so it can chain through enemies
+ * indefinitely, but two wall bounces in a row without an enemy kill in
+ * between ends it (see DEFLECT_MAX_WALL_BOUNCES). A still-hostile projectile
+ * touching the player is instant death (touching an enemy's body is not).
  *
  * Enemy spawning and every step of both pools runs on the caller-supplied
  * world-scaled delta - "the world" only advances while the player is
@@ -226,11 +229,18 @@ export class TimeManager {
    * that visually cuts through walls or enemies. Each bounce also grants
    * SLASH_PREVIEW_BOUNCE_BONUS extra length, so the post-bounce segment
    * itself is long enough to actually show a direction, rather than being
-   * whatever sliver of the original budget happened to be left. Marches in
-   * small steps rather than solving either intersection analytically, since
-   * the arena boundary's distance-per-angle isn't a simple closed form for a
-   * rotating polygon anyway - good enough precision for a cosmetic guide
-   * line.
+   * whatever sliver of the original budget happened to be left.
+   *
+   * Also tracks the exact same wall-bounce budget the real projectile does
+   * (DEFLECT_MAX_WALL_BOUNCES, refreshed by an enemy bounce, consumed by a
+   * wall bounce) - the trace stops dead the instant that budget would run
+   * out, same as the real projectile would despawn there, rather than
+   * drawing a trajectory that isn't actually survivable.
+   *
+   * Marches in small steps rather than solving either intersection
+   * analytically, since the arena boundary's distance-per-angle isn't a
+   * simple closed form for a rotating polygon anyway - good enough
+   * precision for a cosmetic guide line.
    */
   private buildPreviewPath(startX: number, startY: number, angle: number, radius: number, lineLength: number): { x: number; y: number }[] {
     const points: { x: number; y: number }[] = [{ x: startX, y: startY }];
@@ -240,6 +250,7 @@ export class TimeManager {
     let dirY = Math.sin(angle);
     let remaining = lineLength;
     let bounces = 0;
+    let wallBounceBudget = DEFLECT_MAX_WALL_BOUNCES;
 
     while (remaining > 0 && bounces <= SLASH_PREVIEW_MAX_BOUNCES) {
       const step = Math.min(SLASH_PREVIEW_MARCH_STEP, remaining);
@@ -263,6 +274,7 @@ export class TimeManager {
         dirX -= 2 * dot * nx;
         dirY -= 2 * dot * ny;
 
+        wallBounceBudget = DEFLECT_MAX_WALL_BOUNCES;
         remaining -= step;
         remaining += SLASH_PREVIEW_BOUNCE_BONUS;
         bounces++;
@@ -286,6 +298,13 @@ export class TimeManager {
       x = this.arena.bounds.centerX + dx * scale;
       y = this.arena.bounds.centerY + dy * scale;
       points.push({ x, y });
+
+      wallBounceBudget--;
+      if (wallBounceBudget <= 0) {
+        // The real projectile despawns right here - the trace ends at this
+        // bounce point instead of drawing a trajectory it wouldn't survive.
+        break;
+      }
 
       const n = this.arena.normalAtAngle(angleAtPoint);
       const dot = dirX * n.x + dirY * n.y;
@@ -433,8 +452,9 @@ export class TimeManager {
           // The enemy still dies in one hit, same as ever - but the
           // projectile now bounces off its round body (deflecting off
           // enemies is the point) and keeps flying, instead of ending its
-          // journey there. Counts toward the same DEFLECT_MAX_BOUNCES budget
-          // as a wall bounce (see TimeProjectile.bounceOffPoint).
+          // journey there. Refreshes the wall-bounce budget back to full
+          // rather than consuming it (see TimeProjectile.bounceOffPoint) -
+          // enemy bounces are unlimited, wall bounces are the limited part.
           deflected.bounceOffPoint(enemyX, enemyY);
           break;
         }
