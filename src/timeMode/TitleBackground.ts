@@ -32,7 +32,7 @@ const WANDER_RETARGET_MS = 2200;
  * as jerky. Sine in-out has zero velocity at both ends of each segment, so
  * consecutive segments meet smoothly instead of kinking.
  */
-const TIMESCALE_RETARGET_MS = 700;
+const TIMESCALE_RETARGET_MS = 1000;
 type TimescaleBeat = "fast" | "slow";
 const TIMESCALE_PATTERN: TimescaleBeat[] = ["fast", "slow", "slow", "fast", "slow"];
 const TIMESCALE_FAST_RANGE: [number, number] = [0.75, 1];
