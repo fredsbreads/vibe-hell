@@ -227,6 +227,21 @@ export class TimePlayer {
     };
   }
 
+  /**
+   * Clears Slash's cooldown immediately - call this when a deflected
+   * projectile goes on to kill something, rewarding a successful deflect
+   * chain with another swing right away instead of waiting out the full
+   * cooldown. Clamped to slashActiveRemainingMs rather than always
+   * dropping straight to 0: a deflect-kill could in principle land during
+   * the same swing that caused it (a very fast bounce), and canSlash()
+   * only checks the cooldown, not whether a swing is still active - going
+   * below the current swing's own remaining time would let a new swing
+   * start while the old one's hitbox/animation is still playing.
+   */
+  resetSlashCooldown(): void {
+    this.slashCooldownRemainingMs = Math.min(this.slashCooldownRemainingMs, this.slashActiveRemainingMs);
+  }
+
   private canDash(): boolean {
     return this.dashLockoutRemainingMs <= 0;
   }

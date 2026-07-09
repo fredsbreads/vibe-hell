@@ -162,6 +162,11 @@ export class TimeMainScene extends Phaser.Scene {
     this.arena.update(worldScaledDelta);
 
     const deflectedKills = this.timeManager.update(delta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
+    if (deflectedKills > 0) {
+      // Reward a successful deflect chain with another swing right away,
+      // instead of making the player wait out Slash's full cooldown.
+      this.player.resetSlashCooldown();
+    }
     const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
     this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), delta);
     const killsThisFrame = deflectedKills + slashKills;
