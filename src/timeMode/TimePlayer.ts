@@ -81,7 +81,7 @@ export interface AimAssist {
     referenceAngle: number,
     range: number,
     arcWidth: number,
-  ): { target: TimeProjectile; candidates: { angle: number; count: number; enemies: unknown[] }[] } | null;
+  ): { target: TimeProjectile; candidates: { angle: number; count: number }[] } | null;
 }
 
 /**
@@ -128,7 +128,7 @@ export class TimePlayer {
 
   /** Gamepad-stick aim lock state - see updateAimLock. Null target means not currently locked (free continuous aim). */
   private aimLockTarget: TimeProjectile | null = null;
-  private aimLockCandidates: { angle: number; count: number; enemies: unknown[] }[] = [];
+  private aimLockCandidates: { angle: number; count: number }[] = [];
   private aimLockIndex = 0;
   /** False right after a flick fires, until the stick falls back below AIM_LOCK_FLICK_RELEASE_MAGNITUDE - see updateAimLock. */
   private aimLockFlickArmed = true;
@@ -320,19 +320,14 @@ export class TimePlayer {
       // have been at rest (or become so) before the first real flick counts.
       this.aimLockFlickArmed = state.stickAimMagnitude < AIM_LOCK_FLICK_RELEASE_MAGNITUDE;
     } else {
-      // Same target as last frame - carry the selection forward by WHICH
-      // ENEMIES it routes through, not by raw angle or index. The target
-      // projectile is constantly moving, so the exact angle that reaches
-      // any given enemy drifts every single frame even with the stick
-      // held perfectly still - matching by angle against last frame's
-      // value would misread that drift as "the closest candidate changed"
-      // and hop between candidates on its own. Matching by the primary
-      // enemy instead keeps the selection meaning "still aimed at this
-      // same enemy" while its angle continuously (and correctly) tracks
-      // the projectile's motion.
-      const previousPrimaryEnemy = this.aimLockCandidates[this.aimLockIndex]?.enemies[0] ?? null;
+      // Same target as last frame - carry the selection forward by angle,
+      // not raw index, so a candidate list that shifted or shrank (an
+      // enemy further down the chain died, etc.) can't silently jump the
+      // selection to an unrelated angle just because the index still
+      // happens to be in bounds.
+      const previousAngle = this.aimAngle;
       this.aimLockCandidates = result.candidates;
-      this.aimLockIndex = this.candidateIndexForEnemy(result.candidates, previousPrimaryEnemy, this.aimAngle);
+      this.aimLockIndex = this.closestCandidateIndex(result.candidates, previousAngle);
     }
 
     if (this.aimLockCandidates.length > 1 && state.stickAimAngle !== null) {
@@ -347,21 +342,6 @@ export class TimePlayer {
     }
 
     this.aimAngle = this.aimLockCandidates[this.aimLockIndex].angle;
-  }
-
-  /** Whichever candidate's primary enemy matches previousPrimaryEnemy (see updateAimLock) - falling back to closest-by-angle if that enemy isn't in the new list at all (it died, or the candidate band it was part of disappeared as the target moved). */
-  private candidateIndexForEnemy(
-    candidates: { angle: number; count: number; enemies: unknown[] }[],
-    previousPrimaryEnemy: unknown,
-    fallbackAngle: number,
-  ): number {
-    if (previousPrimaryEnemy) {
-      const matchIndex = candidates.findIndex((candidate) => candidate.enemies[0] === previousPrimaryEnemy);
-      if (matchIndex !== -1) {
-        return matchIndex;
-      }
-    }
-    return this.closestCandidateIndex(candidates, fallbackAngle);
   }
 
   private closestCandidateIndex(candidates: { angle: number; count: number }[], angle: number): number {
