@@ -34,7 +34,7 @@ const WANDER_RETARGET_MS = 2200;
  */
 const TIMESCALE_RETARGET_MS = 1000;
 type TimescaleBeat = "fast" | "slow";
-const TIMESCALE_PATTERN: TimescaleBeat[] = ["fast", "slow", "slow", "fast", "slow"];
+const TIMESCALE_PATTERN: TimescaleBeat[] = ["fast", "fast", "fast", "slow", "slow", "slow", "fast", "fast", "slow"];
 const TIMESCALE_FAST_RANGE: [number, number] = [0.75, 1];
 const TIMESCALE_SLOW_RANGE: [number, number] = [MIN_WORLD_TIMESCALE, 0.22];
 
