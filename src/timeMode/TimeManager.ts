@@ -70,6 +70,17 @@ const SLASH_SNAP_SEARCH_STEP = 0.01;
  * hold onto a lock the current swing arc wouldn't actually reach.
  */
 const SLASH_SNAP_RELEASE_HALF_WIDTH = 0.4;
+/**
+ * Minimum total enemies a deflect must hit (the primary target itself, plus
+ * at least this many MORE from bounces) before an angle counts as "chain-
+ * worthy" at all - for both the continuous mouse/keyboard snap and the
+ * gamepad flick-lock's candidate list. A single extra bounce is common
+ * enough (and easy enough to land on your own) that assisting toward it
+ * just felt like noise; this reserves the assist for trajectories actually
+ * worth fighting the tiny margin for.
+ */
+const SLASH_SNAP_MIN_ADDITIONAL_BOUNCES = 2;
+const SLASH_SNAP_MIN_TOTAL_HITS = 1 + SLASH_SNAP_MIN_ADDITIONAL_BOUNCES;
 
 /**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
@@ -292,7 +303,7 @@ export class TimeManager {
     if (this.snapLockedProjectile === projectile && this.snapLockedAngle !== null) {
       const lockedDist = Math.abs(Phaser.Math.Angle.Wrap(rawAngle - this.snapLockedAngle));
       const lockedCount = this.countChainedHits(projectile, this.snapLockedAngle);
-      if (lockedDist <= SLASH_SNAP_RELEASE_HALF_WIDTH && lockedCount > rawCount) {
+      if (lockedDist <= SLASH_SNAP_RELEASE_HALF_WIDTH && lockedCount >= SLASH_SNAP_MIN_TOTAL_HITS && lockedCount > rawCount) {
         const candidate = this.findBestNearbyAngle(playerX, playerY, projectile, this.snapLockedAngle, rawAngle, range, arcWidth);
         if (candidate && candidate.count > lockedCount) {
           this.snapLockedAngle = candidate.angle;
@@ -313,7 +324,7 @@ export class TimeManager {
     return rawAngle;
   }
 
-  /** The best (highest chain count, ties broken by closest to rawAngle) angle within SLASH_SNAP_SEARCH_HALF_WIDTH of searchCenter that still keeps projectile in slash arc - or null if nothing in the window beats a trivial 0. */
+  /** The best (highest chain count, ties broken by closest to rawAngle) angle within SLASH_SNAP_SEARCH_HALF_WIDTH of searchCenter that still keeps projectile in slash arc AND clears SLASH_SNAP_MIN_TOTAL_HITS - or null if nothing in the window qualifies. */
   private findBestNearbyAngle(
     playerX: number,
     playerY: number,
@@ -333,6 +344,9 @@ export class TimeManager {
         continue;
       }
       const count = this.countChainedHits(projectile, angle);
+      if (count < SLASH_SNAP_MIN_TOTAL_HITS) {
+        continue;
+      }
       const dist = Math.abs(Phaser.Math.Angle.Wrap(angle - rawAngle));
       if (!best || count > best.count || (count === best.count && dist < bestDist)) {
         best = { angle, count };
@@ -414,8 +428,10 @@ export class TimeManager {
 
   /**
    * Every distinct "sweet spot" angle around target that chains a deflect
-   * into 2+ total enemies, one entry per contiguous band of qualifying
-   * angles (not one entry per fine-grained sample - buildChainHops'
+   * into at least SLASH_SNAP_MIN_TOTAL_HITS total enemies (the primary hit
+   * plus SLASH_SNAP_MIN_ADDITIONAL_BOUNCES more), one entry per contiguous
+   * band of qualifying angles (not one entry per fine-grained sample -
+   * buildChainHops'
    * underlying geometry is a step function, so a real bounce opportunity is
    * a whole plateau of angles, not a single point). Each band collapses to
    * the angle at its own peak count, at the single sample closest to the
@@ -457,13 +473,13 @@ export class TimeManager {
     const candidates: { angle: number; count: number; enemies: Enemy[] }[] = [];
     let i = 0;
     while (i < samples.length) {
-      if (samples[i].count < 2) {
+      if (samples[i].count < SLASH_SNAP_MIN_TOTAL_HITS) {
         i++;
         continue;
       }
       let j = i;
       let peakCount = 0;
-      while (j < samples.length && samples[j].count >= 2) {
+      while (j < samples.length && samples[j].count >= SLASH_SNAP_MIN_TOTAL_HITS) {
         peakCount = Math.max(peakCount, samples[j].count);
         j++;
       }
