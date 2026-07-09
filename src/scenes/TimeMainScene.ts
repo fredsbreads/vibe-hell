@@ -155,7 +155,11 @@ export class TimeMainScene extends Phaser.Scene {
       return;
     }
 
-    this.player.update(delta, (x, y, angle, range, arcWidth) => this.timeManager.computeSnappedAimAngle(x, y, angle, range, arcWidth));
+    this.player.update(delta, {
+      snapAngle: (x, y, angle, range, arcWidth) => this.timeManager.computeSnappedAimAngle(x, y, angle, range, arcWidth),
+      findChainLock: (x, y, target, referenceAngle, range, arcWidth) =>
+        this.timeManager.findChainLock(x, y, target, referenceAngle, range, arcWidth),
+    });
     const worldTimescale = this.player.worldTimescale;
     const worldScaledDelta = delta * worldTimescale;
 

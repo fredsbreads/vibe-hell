@@ -38,6 +38,12 @@ export interface InputState {
   dashPressed: boolean;
   slashHeld: boolean;
   slashPressed: boolean;
+  /** Whether a physical gamepad's right stick is a live aim source in the current aim mode right now - independent of its current tilt (true even while it's resting at center between flicks). False for mouse/keyboard/movement-based aiming, where there's no stick to flick. */
+  stickAimAvailable: boolean;
+  /** This frame's raw right-stick angle, or null if it's resting inside the deadzone. Separate from aimAngle (which folds in mouse/movement fallback and holds its last value at rest) - this is specifically "what is the stick doing THIS instant", needed to detect a flick gesture. */
+  stickAimAngle: number | null;
+  /** This frame's raw right-stick tilt magnitude (0-1, already past the deadzone rescale), 0 while resting at center. */
+  stickAimMagnitude: number;
 }
 
 /**
@@ -106,16 +112,20 @@ export class PlayerInput {
     // Candidate aim angle from the right stick this frame, or null if the pad
     // isn't connected or its stick is resting in the deadzone.
     let padAimAngle: number | null = null;
+    let stickAimAvailable = false;
+    let stickAimMagnitude = 0;
 
     if (pad) {
       moveX = applyDeadzone(pad.leftStick.x, STICK_DEADZONE);
       moveY = applyDeadzone(pad.leftStick.y, STICK_DEADZONE);
 
       if (aimMode === "free" || aimMode === "virtualStick") {
+        stickAimAvailable = true;
         const aimX = applyDeadzone(pad.rightStick.x, STICK_DEADZONE);
         const aimY = applyDeadzone(pad.rightStick.y, STICK_DEADZONE);
         if (aimX !== 0 || aimY !== 0) {
           padAimAngle = Math.atan2(aimY, aimX);
+          stickAimMagnitude = Math.min(1, Math.hypot(aimX, aimY));
         }
       }
 
@@ -200,7 +210,18 @@ export class PlayerInput {
     this.prevSlashHeld = slashHeld;
     this.lastAimAngle = aimAngle;
 
-    return { moveX, moveY, aimAngle, dashHeld, dashPressed, slashHeld, slashPressed };
+    return {
+      moveX,
+      moveY,
+      aimAngle,
+      dashHeld,
+      dashPressed,
+      slashHeld,
+      slashPressed,
+      stickAimAvailable,
+      stickAimAngle: padAimAngle,
+      stickAimMagnitude,
+    };
   }
 
   /**
