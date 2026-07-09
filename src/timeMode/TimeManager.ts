@@ -54,22 +54,10 @@ const SLASH_PREVIEW_BOUNCE_BONUS = 40;
 const SLASH_PREVIEW_CHAIN_STUB_LENGTH = 26;
 /** Safety cap on how many enemy-to-enemy hops the chain lookahead will follow beyond the primary line - the chain is stopped for real by the first wall bounce or by running out of alive enemies long before this, this just guards against a degenerate arrangement of enemies bouncing back and forth forever. */
 const SLASH_PREVIEW_MAX_CHAIN_HOPS = 6;
-/** How far (rad, each direction) the aim-snap search looks around the player's raw aim (or, while already locked, around the locked angle) for a nearby angle that chains into an extra enemy - see computeSnappedAimAngle. Comfortably inside SLASH_ARC_WIDTH/2 so a snapped angle can't aim the swing at a completely different projectile than the one the player was actually pointing at. */
+/** How far (rad, each direction) the aim-snap search looks around the player's raw aim for a nearby angle that chains into an extra enemy - see computeSnappedAimAngle. Comfortably inside SLASH_ARC_WIDTH/2 so a snapped angle can't aim the swing at a completely different projectile than the one the player was actually pointing at. */
 const SLASH_SNAP_SEARCH_HALF_WIDTH = 0.22;
 /** Angle step (rad) the aim-snap search samples at - fine enough that the snapped angle reads as landing right on the real bounce, not visibly short of it. */
 const SLASH_SNAP_SEARCH_STEP = 0.01;
-/**
- * How far (rad) raw aim can drift from an already-locked snap angle before
- * the lock actually releases - deliberately wider than
- * SLASH_SNAP_SEARCH_HALF_WIDTH (the window used to find/enter a lock in the
- * first place), so the snap acts like a magnet: easy to fall into, harder
- * to fall back out of. Without this asymmetry, recomputing the same tight
- * window fresh off raw aim every frame meant the lock let go the instant
- * raw aim drifted even slightly past the angle it snapped to - "breaks free
- * too easily". Still comfortably under SLASH_ARC_WIDTH/2 so it can never
- * hold onto a lock the current swing arc wouldn't actually reach.
- */
-const SLASH_SNAP_RELEASE_HALF_WIDTH = 0.4;
 
 /**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
@@ -100,9 +88,6 @@ export class TimeManager {
   private readonly previewGraphic: Phaser.GameObjects.Graphics;
   private enemySpawnTimerMs = ENEMY_SPAWN_INTERVAL_MS;
   private previewPulseMs = 0;
-  /** The aim-snap "magnet" lock - see computeSnappedAimAngle. Null whenever nothing is currently locked. */
-  private snapLockedAngle: number | null = null;
-  private snapLockedProjectile: TimeProjectile | null = null;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -257,90 +242,46 @@ export class TimeManager {
   /**
    * Aim assist: the exact angle that chains a deflect into an additional
    * enemy is often only a fraction of a degree wide (see buildChainHops) -
-   * far too tight to reliably hit by feel. Acts like a magnet with two
-   * different widths rather than one: easy to snap INTO a good angle
-   * (SLASH_SNAP_SEARCH_HALF_WIDTH around raw aim), but once locked, raw aim
-   * has to drift the wider SLASH_SNAP_RELEASE_HALF_WIDTH away before the
-   * lock actually lets go - without that asymmetry, recomputing the exact
-   * same tight window fresh off raw aim every frame meant the tiniest wobble
-   * past the snapped angle broke the lock immediately.
-   *
-   * While locked, still searches the (tight) window for a strictly better
-   * nearby angle each frame and upgrades to it if found - so sweeping aim
-   * across a whole cluster of good angles still slides from one to the next
-   * rather than getting stuck on the first one found. The lock is also
-   * re-validated fresh every frame (not trusted from whenever it was set),
-   * so a target that died, moved, or stopped chaining releases immediately
-   * rather than holding onto a promise that's no longer true.
+   * far too tight to reliably hit by feel. If there's a projectile in slash
+   * range near rawAngle, and some nearby angle within
+   * SLASH_SNAP_SEARCH_HALF_WIDTH would send it into MORE enemies (primary
+   * hit(s) plus chain hops) than rawAngle itself achieves, snap to whichever
+   * such angle is closest to rawAngle instead. Recomputed fresh every frame
+   * from the player's current raw aim (not any previous snapped value), so
+   * as the player sweeps their aim across a cluster of nearby good angles,
+   * "closest to rawAngle" naturally slides from one to the next rather than
+   * sticking or jumping - exactly the "snap from one to the other" the
+   * player asked for. Returns rawAngle unchanged if nothing nearby improves
+   * on it (including when nothing is in range to snap to at all).
    */
   computeSnappedAimAngle(playerX: number, playerY: number, rawAngle: number, range: number, arcWidth: number): number {
     const rawHitbox: SlashHitbox = { x: playerX, y: playerY, angle: rawAngle, range, arcWidth, swingId: -1 };
     const projectile = this.findSnapTargetProjectile(playerX, playerY, rawAngle, rawHitbox);
     if (!projectile) {
-      this.snapLockedAngle = null;
-      this.snapLockedProjectile = null;
       return rawAngle;
     }
 
     const rawCount = this.countChainedHits(projectile, rawAngle);
-
-    // Only trust/extend the existing lock if it would actually survive this
-    // frame's release check - otherwise it's already gone, and the search
-    // below needs to center on rawAngle (a genuinely fresh search), not on
-    // the stale lock, or releasing would just immediately re-find and
-    // re-lock the same angle it was supposed to be letting go of.
-    if (this.snapLockedProjectile === projectile && this.snapLockedAngle !== null) {
-      const lockedDist = Math.abs(Phaser.Math.Angle.Wrap(rawAngle - this.snapLockedAngle));
-      const lockedCount = this.countChainedHits(projectile, this.snapLockedAngle);
-      if (lockedDist <= SLASH_SNAP_RELEASE_HALF_WIDTH && lockedCount > rawCount) {
-        const candidate = this.findBestNearbyAngle(playerX, playerY, projectile, this.snapLockedAngle, rawAngle, range, arcWidth);
-        if (candidate && candidate.count > lockedCount) {
-          this.snapLockedAngle = candidate.angle;
-        }
-        return this.snapLockedAngle;
-      }
-    }
-
-    const candidate = this.findBestNearbyAngle(playerX, playerY, projectile, rawAngle, rawAngle, range, arcWidth);
-    if (candidate && candidate.count > rawCount) {
-      this.snapLockedAngle = candidate.angle;
-      this.snapLockedProjectile = projectile;
-      return candidate.angle;
-    }
-
-    this.snapLockedAngle = null;
-    this.snapLockedProjectile = null;
-    return rawAngle;
-  }
-
-  /** The best (highest chain count, ties broken by closest to rawAngle) angle within SLASH_SNAP_SEARCH_HALF_WIDTH of searchCenter that still keeps projectile in slash arc - or null if nothing in the window beats a trivial 0. */
-  private findBestNearbyAngle(
-    playerX: number,
-    playerY: number,
-    projectile: TimeProjectile,
-    searchCenter: number,
-    rawAngle: number,
-    range: number,
-    arcWidth: number,
-  ): { angle: number; count: number } | null {
-    let best: { angle: number; count: number } | null = null;
+    let bestAngle = rawAngle;
+    let bestCount = rawCount;
     let bestDist = Infinity;
 
     for (let offset = -SLASH_SNAP_SEARCH_HALF_WIDTH; offset <= SLASH_SNAP_SEARCH_HALF_WIDTH; offset += SLASH_SNAP_SEARCH_STEP) {
-      const angle = searchCenter + offset;
+      const angle = rawAngle + offset;
       const hitbox: SlashHitbox = { x: playerX, y: playerY, angle, range, arcWidth, swingId: -1 };
       if (!this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, hitbox)) {
         continue;
       }
       const count = this.countChainedHits(projectile, angle);
-      const dist = Math.abs(Phaser.Math.Angle.Wrap(angle - rawAngle));
-      if (!best || count > best.count || (count === best.count && dist < bestDist)) {
-        best = { angle, count };
+      const dist = Math.abs(offset);
+      if (count > bestCount || (count === bestCount && dist < bestDist)) {
+        bestCount = count;
+        bestAngle = angle;
         bestDist = dist;
       }
     }
 
-    return best;
+    return bestCount > rawCount ? bestAngle : rawAngle;
   }
 
   /** The projectile rawAngle would actually deflect right now (same eligibility as checkSlashHits/updateSlashPreview), preferring whichever one is most centered in the arc - the aim-snap search only makes sense relative to a specific projectile's position. */
