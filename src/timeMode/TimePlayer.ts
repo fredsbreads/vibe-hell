@@ -107,6 +107,8 @@ export class TimePlayer {
 
   private dead = false;
   private worldTimescaleValue = 1;
+  /** True once the death replay takes over - suppresses the slash-range indicator (see redrawSlashRangeIndicator), since it exists to inform a live decision that isn't being made anymore. */
+  private isReplaying = false;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -144,6 +146,11 @@ export class TimePlayer {
    */
   setInputSource(source: InputSource): void {
     this.input = source;
+  }
+
+  /** Marks this player as driven by the death replay from now on - hides the slash-range indicator, which exists to inform a live aiming decision that no longer applies once the run is over. */
+  setReplaying(replaying: boolean): void {
+    this.isReplaying = replaying;
   }
 
   /**
@@ -427,11 +434,13 @@ export class TimePlayer {
    * same range/arc-width/current-aim math getPreviewSlashHitbox() and the
    * actual swing both use, so this can never disagree with what's really
    * slashable. Drawn every frame regardless of swing state; brighter when
-   * Slash is actually ready, faint while on cooldown.
+   * Slash is actually ready, faint while on cooldown. Suppressed entirely
+   * during the death replay - it exists to help aim a swing that's about to
+   * happen, and nothing being replayed is still being decided live.
    */
   private redrawSlashRangeIndicator(): void {
     this.slashRangeGraphic.clear();
-    if (!getShowSlashRangeIndicator()) {
+    if (!getShowSlashRangeIndicator() || this.isReplaying) {
       return;
     }
     const ready = this.canSlash();

@@ -448,6 +448,7 @@ export class TimeMainScene extends Phaser.Scene {
 
     this.replaySource = new RecordedInputSource(this.recordedFrames);
     this.player.setInputSource(this.replaySource);
+    this.player.setReplaying(true);
     this.resetForReplayLoop();
   }
 
