@@ -153,6 +153,34 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   }
 
   /**
+   * Mirror-reflects velocity off a round obstacle (an enemy's body) centered
+   * at (centerX, centerY), same math as bounceOffWall() but using the normal
+   * from that center straight through this projectile's current position
+   * instead of the arena's edge normal - the reflection angle depends on
+   * exactly where on the circle it hit, same as any round-body bounce would.
+   * Counts toward the same DEFLECT_MAX_BOUNCES budget as a wall bounce - the
+   * caller (TimeManager) is responsible for actually killing the enemy this
+   * bounced off of; this only handles the projectile's own redirect.
+   */
+  bounceOffPoint(centerX: number, centerY: number): void {
+    const dx = this.x - centerX;
+    const dy = this.y - centerY;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) {
+      return;
+    }
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const dot = this.vx * nx + this.vy * ny;
+    this.vx -= 2 * dot * nx;
+    this.vy -= 2 * dot * ny;
+
+    if (this.isDeflected) {
+      this.deflectedBounceCount++;
+    }
+  }
+
+  /**
    * Advances the projectile - turning toward the player first if it's a
    * still-hostile chaser - and bounces it off the wall. worldScaledDelta is
    * whatever the caller has already multiplied by the current world

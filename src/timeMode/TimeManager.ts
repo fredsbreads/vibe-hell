@@ -53,8 +53,12 @@ const SLASH_PREVIEW_BOUNCE_BONUS = 40;
  * Owns the enemy and projectile pools for the time-dilation mode, and every
  * interaction between them: Slash deflects a hostile projectile or kills an
  * enemy outright (one hit, either way); a deflected/friendly projectile
- * kills any hostile projectile OR enemy it touches for the rest of its
- * life; a still-hostile projectile touching the player is instant death
+ * kills any hostile projectile OR enemy it touches, chaining onward each
+ * time - through a hostile projectile it just destroys and keeps going,
+ * through an enemy it also kills but additionally bounces off (round body,
+ * so the angle depends on exactly where it hit - see
+ * TimeProjectile.bounceOffPoint), continuing to fly rather than stopping
+ * there; a still-hostile projectile touching the player is instant death
  * (touching an enemy's body is not).
  *
  * Enemy spawning and every step of both pools runs on the caller-supplied
@@ -215,17 +219,18 @@ export class TimeManager {
 
   /**
    * Traces the preview trajectory out to lineLength, bending it off the
-   * arena wall (mirror-reflect, same as bounceOffWall()) instead of letting
-   * it run straight through - so a deflect preview near the edge of the
-   * arena shows where the shot would actually go, bounce included, rather
-   * than a line that visually exits the arena. Each bounce also grants
+   * arena wall OR off any alive enemy's round body (mirror-reflect, same
+   * math as TimeProjectile.bounceOffWall()/bounceOffPoint()) instead of
+   * letting it run straight through either - so a deflect preview shows
+   * where the shot would actually go, bounces included, rather than a line
+   * that visually cuts through walls or enemies. Each bounce also grants
    * SLASH_PREVIEW_BOUNCE_BONUS extra length, so the post-bounce segment
    * itself is long enough to actually show a direction, rather than being
    * whatever sliver of the original budget happened to be left. Marches in
-   * small steps rather than solving the wall intersection analytically,
-   * since the arena boundary's distance-per-angle isn't a simple closed
-   * form for a rotating polygon - good enough precision for a cosmetic
-   * guide line.
+   * small steps rather than solving either intersection analytically, since
+   * the arena boundary's distance-per-angle isn't a simple closed form for a
+   * rotating polygon anyway - good enough precision for a cosmetic guide
+   * line.
    */
   private buildPreviewPath(startX: number, startY: number, angle: number, radius: number, lineLength: number): { x: number; y: number }[] {
     const points: { x: number; y: number }[] = [{ x: startX, y: startY }];
@@ -240,6 +245,29 @@ export class TimeManager {
       const step = Math.min(SLASH_PREVIEW_MARCH_STEP, remaining);
       const nextX = x + dirX * step;
       const nextY = y + dirY * step;
+
+      const blockingEnemy = this.findEnemyBlockingPoint(nextX, nextY, radius);
+      if (blockingEnemy) {
+        const dx = nextX - blockingEnemy.x;
+        const dy = nextY - blockingEnemy.y;
+        const distFromEnemy = Math.hypot(dx, dy);
+        const minDist = Enemy.RADIUS + radius;
+        const scale = minDist / distFromEnemy;
+        x = blockingEnemy.x + dx * scale;
+        y = blockingEnemy.y + dy * scale;
+        points.push({ x, y });
+
+        const nx = dx / distFromEnemy;
+        const ny = dy / distFromEnemy;
+        const dot = dirX * nx + dirY * ny;
+        dirX -= 2 * dot * nx;
+        dirY -= 2 * dot * ny;
+
+        remaining -= step;
+        remaining += SLASH_PREVIEW_BOUNCE_BONUS;
+        bounces++;
+        continue;
+      }
 
       const dx = nextX - this.arena.bounds.centerX;
       const dy = nextY - this.arena.bounds.centerY;
@@ -271,6 +299,22 @@ export class TimeManager {
 
     points.push({ x, y });
     return points;
+  }
+
+  /** The first alive enemy whose round body would block a point on the preview's march, or null if none does. */
+  private findEnemyBlockingPoint(x: number, y: number, radius: number): Enemy | null {
+    const minDist = Enemy.RADIUS + radius;
+    for (const enemy of this.enemyPool) {
+      if (!enemy.isAlive) {
+        continue;
+      }
+      const dx = x - enemy.x;
+      const dy = y - enemy.y;
+      if (dx * dx + dy * dy <= minDist * minDist) {
+        return enemy;
+      }
+    }
+    return null;
   }
 
   private drawDashedPath(points: { x: number; y: number }[]): void {
@@ -382,13 +426,16 @@ export class TimeManager {
         const minDist = Enemy.RADIUS + deflected.radius;
         if (dx * dx + dy * dy <= minDist * minDist) {
           spawnPop(this.scene, enemy.x, enemy.y, KILL_POP_COLOR);
+          const enemyX = enemy.x;
+          const enemyY = enemy.y;
           enemy.deactivate();
           kills++;
-          // Unlike chaining through hostile projectiles (which a friendly
-          // projectile keeps living to potentially do more of), landing the
-          // kill on an actual enemy ends its own journey too - a bigger,
-          // more final hit than just clearing another bullet out of the air.
-          deflected.deactivate();
+          // The enemy still dies in one hit, same as ever - but the
+          // projectile now bounces off its round body (deflecting off
+          // enemies is the point) and keeps flying, instead of ending its
+          // journey there. Counts toward the same DEFLECT_MAX_BOUNCES budget
+          // as a wall bounce (see TimeProjectile.bounceOffPoint).
+          deflected.bounceOffPoint(enemyX, enemyY);
           break;
         }
       }
