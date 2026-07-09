@@ -1,8 +1,7 @@
 import Phaser from "phaser";
-import { PlayerInput, InputState } from "../input/PlayerInput";
+import { PlayerInput } from "../input/PlayerInput";
 import { Arena } from "../arena/Arena";
 import { computeWorldTimescale } from "./worldClock";
-import type { TimeProjectile } from "./TimeProjectile";
 
 const DASH_TINT = 0xaefff0;
 const HURT_TINT = 0xff3b3b;
@@ -30,22 +29,6 @@ const SLASH_RANGE_COOLDOWN_COLOR = 0x6a6a80;
 const SLASH_RANGE_READY_ALPHA = 0.35;
 const SLASH_RANGE_COOLDOWN_ALPHA = 0.12;
 
-/**
- * How far the right stick has to tilt to register as a deliberate "flick"
- * cycling the aim lock to the next/previous candidate - well above the
- * light, steady tilt a player might rest at while just holding a direction,
- * so an actual decisive flick doesn't get confused with normal aiming.
- */
-const AIM_LOCK_FLICK_ACTIVATE_MAGNITUDE = 0.75;
-/**
- * How far the stick has to fall back before a NEW flick can register -
- * lower than the activate threshold on purpose, so one flick reads as
- * exactly one step (not several, if the stick lingers near the activate
- * threshold on its way back to center) and the player has to visibly
- * release before flicking again.
- */
-const AIM_LOCK_FLICK_RELEASE_MAGNITUDE = 0.35;
-
 export interface SlashHitbox {
   x: number;
   y: number;
@@ -62,26 +45,6 @@ export interface SlashHitbox {
    * hitbox, which never actually resolves a hit, so this doesn't matter.
    */
   swingId: number;
-}
-
-/**
- * Aim-assist hook TimeMainScene wires up to TimeManager (kept as a narrow
- * interface here, not a direct TimeManager reference, so TimePlayer doesn't
- * need to depend on it) - see computeSnappedAimAngle and findChainLock for
- * what each half actually does.
- */
-export interface AimAssist {
-  /** Continuous magnet-style snap, used for mouse/keyboard aim (no stick to flick, so this is the whole assist for that input). */
-  snapAngle(playerX: number, playerY: number, rawAngle: number, range: number, arcWidth: number): number;
-  /** Discrete lock target + its candidate angles, used for gamepad stick aim (see updateAimLock). */
-  findChainLock(
-    playerX: number,
-    playerY: number,
-    currentTarget: TimeProjectile | null,
-    referenceAngle: number,
-    range: number,
-    arcWidth: number,
-  ): { target: TimeProjectile; candidates: { angle: number; count: number }[] } | null;
 }
 
 /**
@@ -126,13 +89,6 @@ export class TimePlayer {
   private dead = false;
   private worldTimescaleValue = 1;
 
-  /** Gamepad-stick aim lock state - see updateAimLock. Null target means not currently locked (free continuous aim). */
-  private aimLockTarget: TimeProjectile | null = null;
-  private aimLockCandidates: { angle: number; count: number }[] = [];
-  private aimLockIndex = 0;
-  /** False right after a flick fires, until the stick falls back below AIM_LOCK_FLICK_RELEASE_MAGNITUDE - see updateAimLock. */
-  private aimLockFlickArmed = true;
-
   constructor(
     private readonly scene: Phaser.Scene,
     x: number,
@@ -167,24 +123,18 @@ export class TimePlayer {
   }
 
   /**
-   * @param aimAssist Aim-assist hook (see the AimAssist doc comment) -
-   * identity/no-op if omitted, e.g. in a context with no TimeManager to
-   * consult. Applied here, before the raw angle is used for anything else,
-   * so both the real swing (startSlash) and the QoL preview
+   * @param snapAim Aim-assist hook (see TimeManager.computeSnappedAimAngle) -
+   * given the player's position and raw aim angle, returns the angle to
+   * actually aim at (identity if omitted, e.g. in a context with no
+   * TimeManager to consult). Applied here, before the raw angle is used for
+   * anything else, so both the real swing (startSlash) and the QoL preview
    * (getPreviewSlashHitbox, which just reads this.aimAngle) agree on the
-   * same already-assisted direction - a swing can never fly off along a
+   * same already-snapped direction - a swing can never fly off along a
    * slightly different angle than what the preview promised.
    */
-  update(realDelta: number, aimAssist?: AimAssist): void {
+  update(realDelta: number, snapAim?: (x: number, y: number, angle: number, range: number, arcWidth: number) => number): void {
     const state = this.input.read(this.position.x, this.position.y);
-    if (state.stickAimAvailable && aimAssist) {
-      this.updateAimLock(state, aimAssist);
-    } else {
-      this.releaseAimLock();
-      this.aimAngle = aimAssist
-        ? aimAssist.snapAngle(this.position.x, this.position.y, state.aimAngle, SLASH_RANGE, SLASH_ARC_WIDTH)
-        : state.aimAngle;
-    }
+    this.aimAngle = snapAim ? snapAim(this.position.x, this.position.y, state.aimAngle, SLASH_RANGE, SLASH_ARC_WIDTH) : state.aimAngle;
     this.worldTimescaleValue = computeWorldTimescale(state.moveX, state.moveY);
     const worldScaledDelta = realDelta * this.worldTimescaleValue;
 
@@ -285,83 +235,6 @@ export class TimePlayer {
       arcWidth: SLASH_ARC_WIDTH,
       swingId: -1,
     };
-  }
-
-  /**
-   * Gamepad-only aim assist: instead of continuously re-snapping aim to
-   * whatever's closest every frame (which read as shaky/twitchy off a
-   * naturally wobbling analog stick), this freezes aim onto one of a fixed
-   * set of chain-capable candidate angles (see TimeManager.findChainLock)
-   * the instant one's available, and only moves to a different candidate on
-   * a deliberate flick of the stick - the stick's continuous tilt doesn't
-   * drive aim at all while locked, only the flick GESTURE does. Free,
-   * fully continuous aim (state.aimAngle) still applies whenever nothing
-   * chainable is around to lock onto.
-   */
-  private updateAimLock(state: InputState, aimAssist: AimAssist): void {
-    const result = aimAssist.findChainLock(this.position.x, this.position.y, this.aimLockTarget, state.aimAngle, SLASH_RANGE, SLASH_ARC_WIDTH);
-
-    if (!result) {
-      this.releaseAimLock();
-      this.aimAngle = state.aimAngle;
-      return;
-    }
-
-    if (result.target !== this.aimLockTarget) {
-      // Freshly engaging a lock (or the target changed) - pick whichever
-      // candidate is closest to wherever the player was already aiming, so
-      // the lock engaging doesn't itself feel like a jump to an arbitrary
-      // angle.
-      this.aimLockTarget = result.target;
-      this.aimLockCandidates = result.candidates;
-      this.aimLockIndex = this.closestCandidateIndex(result.candidates, state.aimAngle);
-      // A flick that was already in progress when the lock engaged shouldn't
-      // immediately consume itself as the first cycle - require the stick to
-      // have been at rest (or become so) before the first real flick counts.
-      this.aimLockFlickArmed = state.stickAimMagnitude < AIM_LOCK_FLICK_RELEASE_MAGNITUDE;
-    } else {
-      // Same target as last frame - carry the selection forward by angle,
-      // not raw index, so a candidate list that shifted or shrank (an
-      // enemy further down the chain died, etc.) can't silently jump the
-      // selection to an unrelated angle just because the index still
-      // happens to be in bounds.
-      const previousAngle = this.aimAngle;
-      this.aimLockCandidates = result.candidates;
-      this.aimLockIndex = this.closestCandidateIndex(result.candidates, previousAngle);
-    }
-
-    if (this.aimLockCandidates.length > 1 && state.stickAimAngle !== null) {
-      if (state.stickAimMagnitude >= AIM_LOCK_FLICK_ACTIVATE_MAGNITUDE && this.aimLockFlickArmed) {
-        this.aimLockFlickArmed = false;
-        const currentAngle = this.aimLockCandidates[this.aimLockIndex].angle;
-        const direction = Phaser.Math.Angle.Wrap(state.stickAimAngle - currentAngle) >= 0 ? 1 : -1;
-        this.aimLockIndex = (this.aimLockIndex + direction + this.aimLockCandidates.length) % this.aimLockCandidates.length;
-      } else if (state.stickAimMagnitude < AIM_LOCK_FLICK_RELEASE_MAGNITUDE) {
-        this.aimLockFlickArmed = true;
-      }
-    }
-
-    this.aimAngle = this.aimLockCandidates[this.aimLockIndex].angle;
-  }
-
-  private closestCandidateIndex(candidates: { angle: number; count: number }[], angle: number): number {
-    let bestIndex = 0;
-    let bestDist = Infinity;
-    candidates.forEach((candidate, i) => {
-      const dist = Math.abs(Phaser.Math.Angle.Wrap(candidate.angle - angle));
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIndex = i;
-      }
-    });
-    return bestIndex;
-  }
-
-  private releaseAimLock(): void {
-    this.aimLockTarget = null;
-    this.aimLockCandidates = [];
-    this.aimLockIndex = 0;
-    this.aimLockFlickArmed = true;
   }
 
   private canDash(): boolean {
