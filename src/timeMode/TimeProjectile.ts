@@ -16,7 +16,9 @@ const ESCAPE_MARGIN = 80;
  * instead of guessing when the real projectile would actually die.
  */
 export const DEFLECT_MAX_WALL_BOUNCES = 2;
+/** Matches the game's established teal-unselected/yellow-actionable convention (menus, kill pops): not yet re-deflectable stays teal, becoming re-deflectable (see isReDeflectable) switches to yellow - "you can act on this now." Originally distinguished by kind too, but that's deliberately dropped - only the re-deflectable state matters. */
 const DEFLECT_TINT = 0x59f2c8;
+const DEFLECT_REDEFLECTABLE_TINT = 0xffe98a;
 /** Deflected projectiles fly faster than the hostile speed they arrived at, on top of the real-time burst - reads as more dangerous/decisive, and outruns the enemy that fired it in the first place. */
 const DEFLECT_SPEED_MULTIPLIER = 1.6;
 
@@ -42,12 +44,21 @@ const DEFLECT_BURST_MS = 300;
  * velocity - so a curving chaser (or a ricochet that just re-aimed off a
  * bounce) shows a visibly bent tail instead of a straight line extrapolated
  * from its current direction. Sampled by distance traveled rather than by
- * frame, so the tail always represents the same ~TAIL_LENGTH of actual path
+ * frame, so the tail always represents the same ~tailLength of actual path
  * regardless of framerate or how dilated the world currently is.
+ *
+ * That same "a fixed SPATIAL length, not a rate of visible motion" trick is
+ * also how speed gets telegraphed: tailLength itself scales with the
+ * projectile's CURRENT speed (see updateTailLength), so a fast one shows a
+ * visibly longer streak than a slow one no matter how little either has
+ * actually moved on screen this frame - direction already worked this way
+ * (a near-frozen projectile still shows a full tail), this just extends the
+ * same idea to magnitude.
  */
-const TAIL_LENGTH = 46;
+const TAIL_BASE_LENGTH = 46;
+const TAIL_MIN_LENGTH = 20;
+const TAIL_MAX_LENGTH = 140;
 const TAIL_SEGMENTS = 8;
-const TAIL_SEGMENT_LENGTH = TAIL_LENGTH / TAIL_SEGMENTS;
 const TAIL_MAX_ALPHA = 0.85;
 
 /**
@@ -107,9 +118,11 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   /** Which swing (see SlashHitbox.swingId) last deflected this projectile - see wasHitBySwing(). */
   private lastHitSwingId = -1;
 
-  /** Recent velocity headings (radians), oldest first, sampled every TAIL_SEGMENT_LENGTH of travel - see the TAIL_LENGTH doc comment above. */
+  /** Recent velocity headings (radians), oldest first, sampled every tailSegmentLength of travel - see the TAIL_BASE_LENGTH doc comment above. */
   private readonly headingHistory: number[] = [];
   private distanceSinceLastSample = 0;
+  /** tailLength / TAIL_SEGMENTS for the CURRENT speed - recomputed each step(), see updateTailLength(). */
+  private tailSegmentLength = TAIL_BASE_LENGTH / TAIL_SEGMENTS;
 
   constructor(scene: Phaser.Scene, textureKey: string, radius: number) {
     super(scene, 0, 0, textureKey);
@@ -136,11 +149,18 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.headingHistory.length = 0;
     this.headingHistory.push(aimAngle);
     this.distanceSinceLastSample = 0;
+    this.updateTailLength();
     this.setTintFill(this.baseColor);
     this.setAlpha(1);
     this.setActive(true);
     this.setVisible(true);
     this.tailGraphic.setVisible(true);
+  }
+
+  /** Recomputes tailSegmentLength from the CURRENT speed - see the TAIL_BASE_LENGTH doc comment for why tail length itself is the speed cue. Clamped so a near-stationary or absurdly-fast (a few-times-redeflected zoomer) projectile still gets a reasonable, legible tail. */
+  private updateTailLength(): void {
+    const tailLength = Phaser.Math.Clamp((TAIL_BASE_LENGTH * this.speed) / BASE_SPEED, TAIL_MIN_LENGTH, TAIL_MAX_LENGTH);
+    this.tailSegmentLength = tailLength / TAIL_SEGMENTS;
   }
 
   deactivate(): void {
@@ -174,6 +194,14 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     return this.speed * DEFLECT_SPEED_MULTIPLIER;
   }
 
+  /** The tint the sprite/tail should currently show - hostile is its own kind color, deflected-but-not-yet-redeflectable is teal, redeflectable is yellow. Single source of truth so the sprite tint and the tail color can never disagree. */
+  private get currentTintColor(): number {
+    if (!this.isDeflected) {
+      return this.baseColor;
+    }
+    return this.isReDeflectable ? DEFLECT_REDEFLECTABLE_TINT : DEFLECT_TINT;
+  }
+
   /**
    * Redirects along the player's aim angle - friendly from here on, with a
    * brief real-time burst before it starts being world-time-scaled. Also
@@ -194,7 +222,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.speed *= DEFLECT_SPEED_MULTIPLIER;
     this.vx = Math.cos(aimAngle) * this.speed;
     this.vy = Math.sin(aimAngle) * this.speed;
-    this.setTintFill(DEFLECT_TINT);
+    this.updateTailLength();
+    this.setTintFill(this.currentTintColor);
   }
 
   /**
@@ -226,6 +255,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     if (this.isDeflected) {
       this.wallBounceCount = 0;
       this.bouncedOffEnemySinceDeflect = true;
+      this.setTintFill(this.currentTintColor);
     }
   }
 
@@ -279,15 +309,15 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.vy = Math.sin(newAngle) * speed;
   }
 
-  /** Records the current heading once enough path distance has accumulated since the last sample - see the TAIL_LENGTH doc comment. Can push more than one sample in a single call (e.g. a big deflect-burst jump). */
+  /** Records the current heading once enough path distance has accumulated since the last sample - see the TAIL_BASE_LENGTH doc comment. Can push more than one sample in a single call (e.g. a big deflect-burst jump). */
   private sampleHeading(moveDist: number): void {
     this.distanceSinceLastSample += moveDist;
-    while (this.distanceSinceLastSample >= TAIL_SEGMENT_LENGTH) {
+    while (this.distanceSinceLastSample >= this.tailSegmentLength) {
       this.headingHistory.push(Math.atan2(this.vy, this.vx));
       if (this.headingHistory.length > TAIL_SEGMENTS) {
         this.headingHistory.shift();
       }
-      this.distanceSinceLastSample -= TAIL_SEGMENT_LENGTH;
+      this.distanceSinceLastSample -= this.tailSegmentLength;
     }
   }
 
@@ -354,15 +384,15 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     if (speed === 0) {
       return;
     }
-    const color = this.isDeflected ? DEFLECT_TINT : this.baseColor;
+    const color = this.currentTintColor;
 
     let cursorX = this.x;
     let cursorY = this.y;
     for (let i = 0; i < TAIL_SEGMENTS; i++) {
       const historyIndex = Math.max(0, this.headingHistory.length - 1 - i);
       const angle = this.headingHistory[historyIndex];
-      const nextX = cursorX - Math.cos(angle) * TAIL_SEGMENT_LENGTH;
-      const nextY = cursorY - Math.sin(angle) * TAIL_SEGMENT_LENGTH;
+      const nextX = cursorX - Math.cos(angle) * this.tailSegmentLength;
+      const nextY = cursorY - Math.sin(angle) * this.tailSegmentLength;
       const alpha = TAIL_MAX_ALPHA * (1 - i / TAIL_SEGMENTS);
       const width = this.radius * (1 - i / TAIL_SEGMENTS) * 0.9;
       this.tailGraphic.lineStyle(Math.max(1, width), color, alpha);
