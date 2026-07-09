@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { Arena } from "../arena/Arena";
 import { Enemy } from "./Enemy";
-import { TimeProjectile, ProjectileKind } from "./TimeProjectile";
+import { TimeProjectile, ProjectileKind, BASE_DEFLECT_SPEED } from "./TimeProjectile";
 import { SlashHitbox } from "./TimePlayer";
 import { spawnPop } from "../effects/spawnPop";
 
@@ -33,7 +33,10 @@ const HIT_POP_COLOR = 0xff3b3b;
  */
 const SLASH_PREVIEW_COLOR = 0xffffff;
 const SLASH_PREVIEW_RING_PADDING = 5;
-const SLASH_PREVIEW_LINE_LENGTH = 70;
+/** Base trajectory-line length at BASE_DEFLECT_SPEED - actual length scales with each projectile's real deflectSpeed (see drawPreviewHighlight), so a faster post-deflect shot (a zoomer) telegraphs with a visibly longer line. */
+const SLASH_PREVIEW_BASE_LINE_LENGTH = 70;
+const SLASH_PREVIEW_MIN_LINE_LENGTH = 30;
+const SLASH_PREVIEW_MAX_LINE_LENGTH = 160;
 const SLASH_PREVIEW_DASH_LENGTH = 8;
 const SLASH_PREVIEW_GAP_LENGTH = 6;
 const SLASH_PREVIEW_PULSE_PERIOD_MS = 260;
@@ -43,6 +46,8 @@ const SLASH_PREVIEW_MAX_ALPHA = 1;
 const SLASH_PREVIEW_MARCH_STEP = 4;
 /** Safety cap on bounces traced within one preview line - the line is short enough that hitting this in practice would mean a degenerate arena, not normal play. */
 const SLASH_PREVIEW_MAX_BOUNCES = 4;
+/** Extra length granted to the budget each time the preview path bounces off a wall - without this, a bounce early in the line leaves too little of the length budget for the post-bounce segment to show anything useful. */
+const SLASH_PREVIEW_BOUNCE_BONUS = 40;
 
 /**
  * Owns the enemy and projectile pools for the time-dilation mode, and every
@@ -194,27 +199,41 @@ export class TimeManager {
     this.previewGraphic.lineStyle(2, SLASH_PREVIEW_COLOR, alpha);
     this.previewGraphic.strokeCircle(projectile.x, projectile.y, projectile.radius + SLASH_PREVIEW_RING_PADDING);
 
-    const path = this.buildPreviewPath(projectile.x, projectile.y, trajectoryAngle, projectile.radius);
+    // Scale the line length by how much faster/slower this particular
+    // projectile's post-deflect speed is than the baseline - so a zoomer
+    // (2x speed, 2x deflectSpeed) telegraphs with a visibly longer line.
+    const speedRatio = projectile.deflectSpeed / BASE_DEFLECT_SPEED;
+    const lineLength = Phaser.Math.Clamp(
+      SLASH_PREVIEW_BASE_LINE_LENGTH * speedRatio,
+      SLASH_PREVIEW_MIN_LINE_LENGTH,
+      SLASH_PREVIEW_MAX_LINE_LENGTH,
+    );
+
+    const path = this.buildPreviewPath(projectile.x, projectile.y, trajectoryAngle, projectile.radius, lineLength);
     this.drawDashedPath(path);
   }
 
   /**
-   * Traces the preview trajectory out to SLASH_PREVIEW_LINE_LENGTH, bending
-   * it off the arena wall (mirror-reflect, same as bounceOffWall()) instead
-   * of letting it run straight through - so a deflect preview near the edge
-   * of the arena shows where the shot would actually go, bounce included,
-   * rather than a line that visually exits the arena. Marches in small
-   * steps rather than solving the wall intersection analytically, since the
-   * arena boundary's distance-per-angle isn't a simple closed form for a
-   * rotating polygon - good enough precision for a cosmetic guide line.
+   * Traces the preview trajectory out to lineLength, bending it off the
+   * arena wall (mirror-reflect, same as bounceOffWall()) instead of letting
+   * it run straight through - so a deflect preview near the edge of the
+   * arena shows where the shot would actually go, bounce included, rather
+   * than a line that visually exits the arena. Each bounce also grants
+   * SLASH_PREVIEW_BOUNCE_BONUS extra length, so the post-bounce segment
+   * itself is long enough to actually show a direction, rather than being
+   * whatever sliver of the original budget happened to be left. Marches in
+   * small steps rather than solving the wall intersection analytically,
+   * since the arena boundary's distance-per-angle isn't a simple closed
+   * form for a rotating polygon - good enough precision for a cosmetic
+   * guide line.
    */
-  private buildPreviewPath(startX: number, startY: number, angle: number, radius: number): { x: number; y: number }[] {
+  private buildPreviewPath(startX: number, startY: number, angle: number, radius: number, lineLength: number): { x: number; y: number }[] {
     const points: { x: number; y: number }[] = [{ x: startX, y: startY }];
     let x = startX;
     let y = startY;
     let dirX = Math.cos(angle);
     let dirY = Math.sin(angle);
-    let remaining = SLASH_PREVIEW_LINE_LENGTH;
+    let remaining = lineLength;
     let bounces = 0;
 
     while (remaining > 0 && bounces <= SLASH_PREVIEW_MAX_BOUNCES) {
@@ -246,6 +265,7 @@ export class TimeManager {
       dirY -= 2 * dot * n.y;
 
       remaining -= step;
+      remaining += SLASH_PREVIEW_BOUNCE_BONUS;
       bounces++;
     }
 
@@ -376,6 +396,18 @@ export class TimeManager {
     return kills;
   }
 
+  /**
+   * The distance check already treats the target as a circle (it passes as
+   * soon as the target's EDGE reaches into the range circle, not just its
+   * center). The angle check used to only look at the angle to the target's
+   * CENTER, with zero tolerance for its radius - so a projectile whose edge
+   * visually overlapped the arc's boundary line could still fail if its
+   * center sat just outside. Widening the allowed half-angle by
+   * asin(radius / distance) - the extra angle a circle of that radius
+   * subtends from the hitbox origin - makes the angle check agree with the
+   * distance check: touching the arc at all is enough, matching the "does
+   * this circle overlap this wedge" test a player would expect from sight.
+   */
   private isWithinSlashArc(x: number, y: number, radius: number, hitbox: SlashHitbox): boolean {
     const dx = x - hitbox.x;
     const dy = y - hitbox.y;
@@ -383,8 +415,13 @@ export class TimeManager {
     if (distance > hitbox.range + radius) {
       return false;
     }
+    if (distance <= radius) {
+      // The hitbox origin is inside (or touching the center of) the target - no angle to check.
+      return true;
+    }
     const angleToTarget = Math.atan2(dy, dx);
     const angleDiff = Phaser.Math.Angle.Wrap(angleToTarget - hitbox.angle);
-    return Math.abs(angleDiff) <= hitbox.arcWidth / 2;
+    const angularRadius = Math.asin(radius / distance);
+    return Math.abs(angleDiff) <= hitbox.arcWidth / 2 + angularRadius;
   }
 }

@@ -57,6 +57,9 @@ const BASE_SPEED = 200;
 /** How fast (rad/s, world-time-scaled) a chaser can turn its velocity toward the player. Capped rather than instant so it stays dodgeable. Exported so decorative reuses (e.g. the title screen background) can match the real in-game turn feel. */
 export const CHASER_TURN_RATE = 2.5;
 
+/** The deflect speed of a "normal" (non-zoomer) projectile - exported as the reference point the slash preview scales its trajectory-line length against, so a faster post-deflect speed (e.g. a zoomer) reads as a visibly longer line. */
+export const BASE_DEFLECT_SPEED = BASE_SPEED * DEFLECT_SPEED_MULTIPLIER;
+
 /** Speed and color per kind - color doubles as the tail's color, so each kind reads as visually distinct at a glance. Exported as the single source of truth for anything else that wants to reuse the same look (e.g. the title screen background). */
 export const KIND_CONFIG: Record<ProjectileKind, { speed: number; color: number }> = {
   straight: { speed: BASE_SPEED, color: 0xf2e85c },
@@ -133,12 +136,17 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     return this.isDeflected;
   }
 
+  /** The speed this projectile would fly off at if deflected right now - exposed for the "would this get deflected" QoL preview, so it can telegraph a faster post-deflect speed (e.g. a zoomer) with a longer trajectory line. */
+  get deflectSpeed(): number {
+    return this.speed * DEFLECT_SPEED_MULTIPLIER;
+  }
+
   /** Redirects along the player's aim angle at a boosted speed (see DEFLECT_SPEED_MULTIPLIER) - friendly from here on, with a brief real-time burst before it starts being world-time-scaled. Also ends any chasing/ricochet behavior immediately (see step()/bounceOffWall()), regardless of its original kind. */
   deflect(aimAngle: number): void {
     this.isDeflected = true;
     this.deflectedBounceCount = 0;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
-    const deflectSpeed = this.speed * DEFLECT_SPEED_MULTIPLIER;
+    const deflectSpeed = this.deflectSpeed;
     this.vx = Math.cos(aimAngle) * deflectSpeed;
     this.vy = Math.sin(aimAngle) * deflectSpeed;
     this.setTintFill(DEFLECT_TINT);
