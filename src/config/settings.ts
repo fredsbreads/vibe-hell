@@ -19,3 +19,14 @@ export function getAimMode(): AimMode {
   const stored = localStorage.getItem(AIM_MODE_STORAGE_KEY);
   return (AIM_MODE_CYCLE as string[]).includes(stored ?? "") ? (stored as AimMode) : "free";
 }
+
+const SHOW_SLASH_RANGE_STORAGE_KEY = "vibehell.showSlashRange";
+
+/** Whether the persistent Slash-range wedge outline (see TimePlayer.redrawSlashRangeIndicator) is drawn at all - some players find it clutters the view now that they know the range by feel. Defaults to on (the original always-visible behavior) so existing players see no change unless they opt out. */
+export function getShowSlashRangeIndicator(): boolean {
+  return localStorage.getItem(SHOW_SLASH_RANGE_STORAGE_KEY) !== "false";
+}
+
+export function setShowSlashRangeIndicator(value: boolean): void {
+  localStorage.setItem(SHOW_SLASH_RANGE_STORAGE_KEY, value ? "true" : "false");
+}

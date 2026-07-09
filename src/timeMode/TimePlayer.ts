@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { PlayerInput } from "../input/PlayerInput";
 import { Arena } from "../arena/Arena";
 import { computeWorldTimescale } from "./worldClock";
+import { getShowSlashRangeIndicator } from "../config/settings";
 
 const DASH_TINT = 0xaefff0;
 const HURT_TINT = 0xff3b3b;
@@ -347,6 +348,9 @@ export class TimePlayer {
    */
   private redrawSlashRangeIndicator(): void {
     this.slashRangeGraphic.clear();
+    if (!getShowSlashRangeIndicator()) {
+      return;
+    }
     const ready = this.canSlash();
     const color = ready ? SLASH_RANGE_READY_COLOR : SLASH_RANGE_COOLDOWN_COLOR;
     const alpha = ready ? SLASH_RANGE_READY_ALPHA : SLASH_RANGE_COOLDOWN_ALPHA;

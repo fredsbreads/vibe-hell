@@ -6,6 +6,7 @@ import { Arena } from "../arena/Arena";
 import { PolygonArena } from "../arena/PolygonArena";
 import { DualSenseMap, isPadButtonDown } from "../input/DualSenseMap";
 import { MenuOverlay } from "../ui/MenuOverlay";
+import { getShowSlashRangeIndicator, setShowSlashRangeIndicator } from "../config/settings";
 
 type UiState = "playing" | "paused" | "gameOver";
 
@@ -44,6 +45,8 @@ export class TimeMainScene extends Phaser.Scene {
 
   private uiState: UiState = "playing";
   private menuOverlay!: MenuOverlay;
+  /** Set while the OPTIONS submenu (reached from Pause) is showing - non-null means "esc/circle/BACK should return here" instead of the normal state-based back behavior. Null the rest of the time. */
+  private optionsBackTarget: (() => void) | null = null;
   private menuHintText!: Phaser.GameObjects.Text;
   private escKey!: Phaser.Input.Keyboard.Key;
   private confirmKey!: Phaser.Input.Keyboard.Key;
@@ -201,7 +204,9 @@ export class TimeMainScene extends Phaser.Scene {
     const escPressed = escHeld && !this.prevEscHeld;
     this.prevEscHeld = escHeld;
     if (escPressed) {
-      if (this.uiState === "playing") {
+      if (this.optionsBackTarget) {
+        this.closeOptions();
+      } else if (this.uiState === "playing") {
         this.enterPause();
       } else if (this.uiState === "paused") {
         this.exitPause();
@@ -213,8 +218,12 @@ export class TimeMainScene extends Phaser.Scene {
     const cancelHeld = isPadButtonDown(pad, DualSenseMap.CIRCLE);
     const cancelPressed = cancelHeld && !this.prevCancelHeld;
     this.prevCancelHeld = cancelHeld;
-    if (cancelPressed && this.uiState === "paused") {
-      this.exitPause();
+    if (cancelPressed) {
+      if (this.optionsBackTarget) {
+        this.closeOptions();
+      } else if (this.uiState === "paused") {
+        this.exitPause();
+      }
     }
 
     const restartHeld = this.restartKey.isDown || isPadButtonDown(pad, DualSenseMap.TRIANGLE);
@@ -279,10 +288,33 @@ export class TimeMainScene extends Phaser.Scene {
     this.resyncMenuNavHeldState();
     this.menuOverlay.show("PAUSED", "", [
       { label: "RESUME", onSelect: () => this.exitPause() },
+      { label: "OPTIONS", onSelect: () => this.showOptions(() => this.enterPause()) },
       { label: "RESTART", onSelect: () => this.restartRun() },
       { label: "MAIN MENU", onSelect: () => this.goToMainMenu() },
     ]);
     this.menuHintText.setVisible(true);
+  }
+
+  /** Swaps the (already-showing) menu overlay to the OPTIONS screen - onBack is called (and the overlay swapped back) on BACK/esc/circle. Reuses the single shared menuOverlay rather than a separate instance, matching how pause/game-over already share it. */
+  private showOptions(onBack: () => void): void {
+    this.optionsBackTarget = onBack;
+    this.resyncMenuNavHeldState();
+    this.menuOverlay.show("OPTIONS", "", [
+      {
+        label: `SLASH RANGE INDICATOR: ${getShowSlashRangeIndicator() ? "ON" : "OFF"}`,
+        onSelect: () => {
+          setShowSlashRangeIndicator(!getShowSlashRangeIndicator());
+          this.showOptions(onBack);
+        },
+      },
+      { label: "BACK", onSelect: () => this.closeOptions() },
+    ]);
+  }
+
+  private closeOptions(): void {
+    const back = this.optionsBackTarget;
+    this.optionsBackTarget = null;
+    back?.();
   }
 
   private exitPause(): void {
