@@ -73,7 +73,7 @@ export interface SlashHitbox {
 export interface AimAssist {
   /** Continuous magnet-style snap, used for mouse/keyboard aim (no stick to flick, so this is the whole assist for that input). */
   snapAngle(playerX: number, playerY: number, rawAngle: number, range: number, arcWidth: number): number;
-  /** Discrete lock target + its candidate angles, used for gamepad stick aim (see updateAimLock). */
+  /** Discrete lock target + its candidate angles, used for gamepad stick aim (see updateAimLock). preferredChain (the caller's currently selected chain, if any) biases which sample represents a still-qualifying band, so a band whose peak depth is flickering doesn't misreport the caller's actual selection as having moved. */
   findChainLock(
     playerX: number,
     playerY: number,
@@ -81,6 +81,8 @@ export interface AimAssist {
     referenceAngle: number,
     range: number,
     arcWidth: number,
+    preferredChain: unknown[],
+    preferredAngle: number,
   ): { target: TimeProjectile; candidates: { angle: number; count: number; enemies: unknown[] }[] } | null;
 }
 
@@ -299,7 +301,17 @@ export class TimePlayer {
    * chainable is around to lock onto.
    */
   private updateAimLock(state: InputState, aimAssist: AimAssist): void {
-    const result = aimAssist.findChainLock(this.position.x, this.position.y, this.aimLockTarget, state.aimAngle, SLASH_RANGE, SLASH_ARC_WIDTH);
+    const previousChain = this.aimLockCandidates[this.aimLockIndex]?.enemies ?? [];
+    const result = aimAssist.findChainLock(
+      this.position.x,
+      this.position.y,
+      this.aimLockTarget,
+      state.aimAngle,
+      SLASH_RANGE,
+      SLASH_ARC_WIDTH,
+      previousChain,
+      this.aimAngle,
+    );
 
     if (!result) {
       this.releaseAimLock();
@@ -331,7 +343,6 @@ export class TimePlayer {
       // enemies instead keeps "still riding the same course" stable (aim
       // is what adjusts to keep threading it) while a flick is what
       // actually switches to a different course.
-      const previousChain = this.aimLockCandidates[this.aimLockIndex]?.enemies ?? [];
       this.aimLockCandidates = result.candidates;
       this.aimLockIndex = this.candidateIndexForChain(result.candidates, previousChain, this.aimAngle);
     }
@@ -357,9 +368,14 @@ export class TimePlayer {
    * TAIL (still hits the same enemy first, chains differently after) beats
    * one that's lost the whole thing, so the selection degrades gracefully
    * rather than jumping to something unrelated the moment the very end of
-   * the chain shifts. Falls back to closest-by-angle only if nothing shares
-   * even the first enemy (the course is genuinely gone - it died, or moved
-   * out of range).
+   * the chain shifts. Ties in score (e.g. a chain that occasionally ping-
+   * pongs into a longer or shorter tail, producing two equally-good-looking
+   * candidates some frames) are broken by proximity to fallbackAngle (the
+   * previous frame's angle) rather than array order, so a tie can't flip
+   * the pick between two candidates on its own as their exact extents shift
+   * with the moving target/player - that flip is itself a jitter source.
+   * Falls back to closest-by-angle only if nothing shares even the first
+   * enemy (the course is genuinely gone - it died, or moved out of range).
    */
   private candidateIndexForChain(
     candidates: { angle: number; count: number; enemies: unknown[] }[],
@@ -368,15 +384,18 @@ export class TimePlayer {
   ): number {
     if (previousChain.length > 0) {
       let bestIndex = -1;
-      let bestScore = 0;
+      let bestScore = -1;
+      let bestDist = Infinity;
       candidates.forEach((candidate, i) => {
         const score = this.chainMatchScore(candidate.enemies, previousChain);
-        if (score > bestScore) {
+        const dist = Math.abs(Phaser.Math.Angle.Wrap(candidate.angle - fallbackAngle));
+        if (score > bestScore || (score === bestScore && dist < bestDist)) {
           bestScore = score;
+          bestDist = dist;
           bestIndex = i;
         }
       });
-      if (bestIndex !== -1) {
+      if (bestIndex !== -1 && bestScore > 0) {
         return bestIndex;
       }
     }

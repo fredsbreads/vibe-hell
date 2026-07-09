@@ -111,7 +111,8 @@ export class TimeManager {
   private readonly previewGraphic: Phaser.GameObjects.Graphics;
   private enemySpawnTimerMs = ENEMY_SPAWN_INTERVAL_MS;
   private previewPulseMs = 0;
-  /** The aim-snap "magnet" lock - see computeSnappedAimAngle. Null whenever nothing is currently locked. */
+  /** The aim-snap "magnet" lock - see computeSnappedAimAngle. Null whenever nothing is currently locked. snapLockedAngle exists purely as a tie-break reference (closest-to-last-frame) when multiple candidates share the same chainMatchScore - the chain (not the angle) is the actual identity. */
+  private snapLockedChain: Enemy[] | null = null;
   private snapLockedAngle: number | null = null;
   private snapLockedProjectile: TimeProjectile | null = null;
 
@@ -266,95 +267,127 @@ export class TimeManager {
   }
 
   /**
-   * Aim assist: the exact angle that chains a deflect into an additional
-   * enemy is often only a fraction of a degree wide (see buildChainHops) -
-   * far too tight to reliably hit by feel. Acts like a magnet with two
-   * different widths rather than one: easy to snap INTO a good angle
-   * (SLASH_SNAP_SEARCH_HALF_WIDTH around raw aim), but once locked, raw aim
-   * has to drift the wider SLASH_SNAP_RELEASE_HALF_WIDTH away before the
-   * lock actually lets go - without that asymmetry, recomputing the exact
-   * same tight window fresh off raw aim every frame meant the tiniest wobble
-   * past the snapped angle broke the lock immediately.
+   * Aim assist: the exact angle that chains a deflect into 2+ additional
+   * enemies is often only a fraction of a degree wide (see buildChainHops) -
+   * far too tight to reliably hit by feel. Shares its underlying candidate
+   * search (findChainCandidateAngles) with the gamepad flick-lock
+   * (findChainLock) rather than running its own separate narrower search -
+   * an earlier version of this method tracked a single locked angle
+   * (rather than which ENEMIES it routed through) and re-searched a fixed
+   * window around it every frame, which meant the constantly-moving target
+   * projectile made even a rock-steady mouse read as jittery: the "best
+   * angle within the window" is itself a moving target when the geometry
+   * producing it never stops shifting.
    *
-   * While locked, still searches the (tight) window for a strictly better
-   * nearby angle each frame and upgrades to it if found - so sweeping aim
-   * across a whole cluster of good angles still slides from one to the next
-   * rather than getting stuck on the first one found. The lock is also
-   * re-validated fresh every frame (not trusted from whenever it was set),
-   * so a target that died, moved, or stopped chaining releases immediately
-   * rather than holding onto a promise that's no longer true.
+   * Instead, this locks onto a CHAIN (an ordered list of enemies - see
+   * snapLockedChain) and, every frame, re-derives whichever current
+   * candidate shares the longest matching prefix with it (same
+   * chainMatchScore idea TimePlayer's flick-lock uses) - the angle is free
+   * to drift smoothly frame to frame to keep threading that same chain as
+   * things move, but the SELECTION itself only changes when raw aim
+   * deliberately moves toward a different candidate. A wider release margin
+   * (SLASH_SNAP_RELEASE_HALF_WIDTH vs the tighter SLASH_SNAP_SEARCH_HALF_
+   * WIDTH used to newly engage one) means raw aim has to drift meaningfully
+   * away before that switch happens, not just wobble past whatever the
+   * locked chain's current angle happens to be.
    */
   computeSnappedAimAngle(playerX: number, playerY: number, rawAngle: number, range: number, arcWidth: number): number {
     const rawHitbox: SlashHitbox = { x: playerX, y: playerY, angle: rawAngle, range, arcWidth, swingId: -1 };
-    const projectile = this.findSnapTargetProjectile(playerX, playerY, rawAngle, rawHitbox);
+    let projectile = this.snapLockedProjectile;
+    if (projectile && (!projectile.active || (projectile.deflected && !projectile.isReDeflectable))) {
+      projectile = null;
+    }
     if (!projectile) {
+      projectile = this.findSnapTargetProjectile(playerX, playerY, rawAngle, rawHitbox);
+    }
+    if (!projectile) {
+      this.snapLockedChain = null;
       this.snapLockedAngle = null;
       this.snapLockedProjectile = null;
       return rawAngle;
     }
 
-    const rawCount = this.countChainedHits(projectile, rawAngle);
+    const preferredChain = this.snapLockedProjectile === projectile ? this.snapLockedChain : null;
+    const candidates = this.findChainCandidateAngles(
+      playerX,
+      playerY,
+      projectile,
+      range,
+      arcWidth,
+      preferredChain,
+      this.snapLockedAngle ?? 0,
+    );
+    if (candidates.length === 0) {
+      this.snapLockedChain = null;
+      this.snapLockedAngle = null;
+      this.snapLockedProjectile = null;
+      return rawAngle;
+    }
 
-    // Only trust/extend the existing lock if it would actually survive this
-    // frame's release check - otherwise it's already gone, and the search
-    // below needs to center on rawAngle (a genuinely fresh search), not on
-    // the stale lock, or releasing would just immediately re-find and
-    // re-lock the same angle it was supposed to be letting go of.
-    if (this.snapLockedProjectile === projectile && this.snapLockedAngle !== null) {
-      const lockedDist = Math.abs(Phaser.Math.Angle.Wrap(rawAngle - this.snapLockedAngle));
-      const lockedCount = this.countChainedHits(projectile, this.snapLockedAngle);
-      if (lockedDist <= SLASH_SNAP_RELEASE_HALF_WIDTH && lockedCount >= SLASH_SNAP_MIN_TOTAL_HITS && lockedCount > rawCount) {
-        const candidate = this.findBestNearbyAngle(playerX, playerY, projectile, this.snapLockedAngle, rawAngle, range, arcWidth);
-        if (candidate && candidate.count > lockedCount) {
-          this.snapLockedAngle = candidate.angle;
+    // Still the same target as last frame - try to keep riding whichever
+    // candidate best continues the previously locked chain, as long as raw
+    // aim hasn't drifted past the (wider) release margin from its current
+    // angle. Ties in match score (two candidates sharing an equally long
+    // prefix - e.g. a chain that occasionally ping-pongs into a longer or
+    // shorter tail) are broken by proximity to the PREVIOUS frame's angle,
+    // not just whichever happens to sort first - otherwise a tie could
+    // silently flip the pick between two candidates as their exact extents
+    // shift with the moving target, which is its own source of jitter.
+    if (this.snapLockedProjectile === projectile && this.snapLockedChain && this.snapLockedAngle !== null) {
+      let best: { angle: number; count: number; enemies: Enemy[] } | null = null;
+      let bestScore = -1;
+      let bestDist = Infinity;
+      for (const candidate of candidates) {
+        const score = this.chainMatchScore(candidate.enemies, this.snapLockedChain);
+        const dist = Math.abs(Phaser.Math.Angle.Wrap(candidate.angle - this.snapLockedAngle));
+        if (score > bestScore || (score === bestScore && dist < bestDist)) {
+          best = candidate;
+          bestScore = score;
+          bestDist = dist;
         }
-        return this.snapLockedAngle;
+      }
+      if (best && bestScore > 0) {
+        const rawDist = Math.abs(Phaser.Math.Angle.Wrap(rawAngle - best.angle));
+        if (rawDist <= SLASH_SNAP_RELEASE_HALF_WIDTH) {
+          this.snapLockedChain = best.enemies;
+          this.snapLockedAngle = best.angle;
+          return best.angle;
+        }
       }
     }
 
-    const candidate = this.findBestNearbyAngle(playerX, playerY, projectile, rawAngle, rawAngle, range, arcWidth);
-    if (candidate && candidate.count > rawCount) {
-      this.snapLockedAngle = candidate.angle;
+    // No lock survived (or there wasn't one) - engage fresh on whichever
+    // candidate is closest to raw aim, same tight window used to newly
+    // enter a lock in the first place.
+    let closest: { angle: number; count: number; enemies: Enemy[] } | null = null;
+    let closestDist = Infinity;
+    for (const candidate of candidates) {
+      const dist = Math.abs(Phaser.Math.Angle.Wrap(candidate.angle - rawAngle));
+      if (dist <= SLASH_SNAP_SEARCH_HALF_WIDTH && dist < closestDist) {
+        closest = candidate;
+        closestDist = dist;
+      }
+    }
+    if (closest) {
+      this.snapLockedChain = closest.enemies;
+      this.snapLockedAngle = closest.angle;
       this.snapLockedProjectile = projectile;
-      return candidate.angle;
+      return closest.angle;
     }
 
+    this.snapLockedChain = null;
     this.snapLockedAngle = null;
     this.snapLockedProjectile = null;
     return rawAngle;
   }
 
-  /** The best (highest chain count, ties broken by closest to rawAngle) angle within SLASH_SNAP_SEARCH_HALF_WIDTH of searchCenter that still keeps projectile in slash arc AND clears SLASH_SNAP_MIN_TOTAL_HITS - or null if nothing in the window qualifies. */
-  private findBestNearbyAngle(
-    playerX: number,
-    playerY: number,
-    projectile: TimeProjectile,
-    searchCenter: number,
-    rawAngle: number,
-    range: number,
-    arcWidth: number,
-  ): { angle: number; count: number } | null {
-    let best: { angle: number; count: number } | null = null;
-    let bestDist = Infinity;
-
-    for (let offset = -SLASH_SNAP_SEARCH_HALF_WIDTH; offset <= SLASH_SNAP_SEARCH_HALF_WIDTH; offset += SLASH_SNAP_SEARCH_STEP) {
-      const angle = searchCenter + offset;
-      const hitbox: SlashHitbox = { x: playerX, y: playerY, angle, range, arcWidth, swingId: -1 };
-      if (!this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, hitbox)) {
-        continue;
-      }
-      const count = this.countChainedHits(projectile, angle);
-      if (count < SLASH_SNAP_MIN_TOTAL_HITS) {
-        continue;
-      }
-      const dist = Math.abs(Phaser.Math.Angle.Wrap(angle - rawAngle));
-      if (!best || count > best.count || (count === best.count && dist < bestDist)) {
-        best = { angle, count };
-        bestDist = dist;
-      }
+  /** Length of the shared leading run between two enemy chains - see TimePlayer's identical helper (kept separate since the two live on opposite sides of the AimAssist boundary and there's nothing to share it through). */
+  private chainMatchScore(a: Enemy[], b: Enemy[]): number {
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) {
+      i++;
     }
-
-    return best;
+    return i;
   }
 
   /** The projectile rawAngle would actually deflect right now (same eligibility as checkSlashHits/updateSlashPreview), preferring whichever one is most centered in the arc - the aim-snap search only makes sense relative to a specific projectile's position. */
@@ -401,6 +434,18 @@ export class TimeManager {
    * to-angle rule as computeSnappedAimAngle's target search. Returns null
    * if there's nothing chainable to lock onto at all (caller should fall
    * back to free continuous aim).
+   *
+   * preferredChain (the caller's currently selected chain, if any) is
+   * forwarded straight to findChainCandidateAngles so the candidate the
+   * caller is already riding stays represented by whichever sample
+   * continues it, rather than by whatever depth happens to be deepest this
+   * particular frame - see that method's doc comment for why that matters.
+   * preferredAngle (the caller's previously selected ANGLE, not the raw
+   * aim) is the tie-break reference for that - deliberately separate from
+   * referenceAngle (raw aim, only used to find a NEW target/candidate),
+   * since while locked the stick's continuous position doesn't drive aim
+   * at all, so raw aim is a poor stand-in for "where the selection actually
+   * was."
    */
   findChainLock(
     playerX: number,
@@ -409,6 +454,8 @@ export class TimeManager {
     referenceAngle: number,
     range: number,
     arcWidth: number,
+    preferredChain: Enemy[] | null = null,
+    preferredAngle = 0,
   ): { target: TimeProjectile; candidates: { angle: number; count: number; enemies: Enemy[] }[] } | null {
     let target = currentTarget;
     if (target && (!target.active || (target.deflected && !target.isReDeflectable))) {
@@ -422,7 +469,15 @@ export class TimeManager {
       return null;
     }
 
-    const candidates = this.findChainCandidateAngles(playerX, playerY, target, range, arcWidth);
+    const candidates = this.findChainCandidateAngles(
+      playerX,
+      playerY,
+      target,
+      range,
+      arcWidth,
+      target === currentTarget ? preferredChain : null,
+      preferredAngle,
+    );
     return candidates.length > 0 ? { target, candidates } : null;
   }
 
@@ -431,23 +486,42 @@ export class TimeManager {
    * into at least SLASH_SNAP_MIN_TOTAL_HITS total enemies (the primary hit
    * plus SLASH_SNAP_MIN_ADDITIONAL_BOUNCES more), one entry per contiguous
    * band of qualifying angles (not one entry per fine-grained sample -
-   * buildChainHops'
-   * underlying geometry is a step function, so a real bounce opportunity is
-   * a whole plateau of angles, not a single point). Each band collapses to
-   * the angle at its own peak count, at the single sample closest to the
-   * plateau's center (not an angle-average across ties - target is
-   * constantly moving, so a plateau's exact extent shifts every frame, and
-   * averaging across however many samples happened to tie for the peak
-   * this particular frame made the "center" itself noisy frame to frame in
-   * a way picking one well-centered sample doesn't). Sorted by angle so
-   * index order matches physical left-to-right/clockwise order for cycling
-   * through.
+   * buildChainHops' underlying geometry is a step function, so a real
+   * bounce opportunity is a whole plateau of angles, not a single point).
+   * Sorted by angle so index order matches physical left-to-right/clockwise
+   * order for cycling through.
    *
-   * Each candidate also carries the ordered list of enemies its peak sample
-   * actually hits (see resolveChain) - since target keeps moving, the exact
-   * angle for "the same conceptual candidate" (same downstream enemies)
+   * A single band isn't always one clean plateau at one bounce count
+   * though - a target/player in motion can make a band's ACHIEVABLE depth
+   * (3 hits here, 4 a little further along, back to 3, etc., especially
+   * with two enemies close enough to ping-pong a deflect between them)
+   * flicker between multiple depths frame to frame well before the band as
+   * a whole stops qualifying at all. Always reporting whichever depth
+   * happens to be deepest THIS frame would mean the reported angle keeps
+   * jumping between wherever each depth's own (often quite different, and
+   * often much narrower / harder to hold for a deeper chain) sweet spot
+   * happens to sit. preferredChain (the currently locked chain, if any)
+   * lets the caller ask "what's still the same course" instead: if any
+   * sample in the band continues that chain at all (shares a nonzero
+   * prefix), the deepest/most-central sample achieving the BEST match is
+   * used as the band's representative rather than the band's raw peak -
+   * falling back to the true peak only when nothing in the band continues
+   * the previous chain (it's genuinely gone).
+   *
+   * Each candidate also carries the ordered list of enemies its
+   * representative sample actually hits (see resolveChain) - since target
+   * keeps moving, the exact angle for "the same conceptual candidate"
    * drifts continuously frame to frame, so callers should track a
    * selection by comparing this enemy list, not by re-matching on angle.
+   *
+   * preferredAngle (typically the previously locked angle) breaks ties
+   * among several samples that equally-best continue preferredChain - a
+   * chain that flickers can leave its own matching angles split into more
+   * than one disjoint stretch within the same band (e.g. matches near the
+   * start AND near the end, with a differently-scoring stretch in between),
+   * and always taking the first one found (leftmost) rather than whichever
+   * is actually closest to where the selection just was is its own source
+   * of unnecessary repositioning.
    */
   private findChainCandidateAngles(
     playerX: number,
@@ -455,46 +529,72 @@ export class TimeManager {
     target: TimeProjectile,
     range: number,
     arcWidth: number,
+    preferredChain: Enemy[] | null = null,
+    preferredAngle = 0,
   ): { angle: number; count: number; enemies: Enemy[] }[] {
     const angleToTarget = Math.atan2(target.y - playerY, target.x - playerX);
     const dist = Math.hypot(target.x - playerX, target.y - playerY);
     const angularRadius = dist > 0 ? Math.asin(Math.min(1, target.radius / dist)) : Math.PI;
     const halfSpan = arcWidth / 2 + angularRadius;
 
-    const samples: { angle: number; count: number }[] = [];
+    const samples: { angle: number; enemies: Enemy[] }[] = [];
     for (let a = angleToTarget - halfSpan; a <= angleToTarget + halfSpan; a += SLASH_SNAP_SEARCH_STEP) {
       const hitbox: SlashHitbox = { x: playerX, y: playerY, angle: a, range, arcWidth, swingId: -1 };
       if (!this.isWithinSlashArc(target.x, target.y, target.radius, hitbox)) {
         continue;
       }
-      samples.push({ angle: a, count: this.countChainedHits(target, a) });
+      samples.push({ angle: a, enemies: this.resolveChain(target, a) });
     }
 
     const candidates: { angle: number; count: number; enemies: Enemy[] }[] = [];
     let i = 0;
     while (i < samples.length) {
-      if (samples[i].count < SLASH_SNAP_MIN_TOTAL_HITS) {
+      if (samples[i].enemies.length < SLASH_SNAP_MIN_TOTAL_HITS) {
         i++;
         continue;
       }
       let j = i;
-      let peakCount = 0;
-      while (j < samples.length && samples[j].count >= SLASH_SNAP_MIN_TOTAL_HITS) {
-        peakCount = Math.max(peakCount, samples[j].count);
+      while (j < samples.length && samples[j].enemies.length >= SLASH_SNAP_MIN_TOTAL_HITS) {
         j++;
       }
-      let peakStart = -1;
-      let peakEnd = -1;
-      for (let k = i; k < j; k++) {
-        if (samples[k].count === peakCount) {
-          if (peakStart === -1) {
-            peakStart = k;
+
+      let chosen = -1;
+      if (preferredChain) {
+        let bestScore = 0;
+        let bestDist = Infinity;
+        for (let k = i; k < j; k++) {
+          const score = this.chainMatchScore(samples[k].enemies, preferredChain);
+          if (score === 0) {
+            continue;
           }
-          peakEnd = k;
+          const dist = Math.abs(Phaser.Math.Angle.Wrap(samples[k].angle - preferredAngle));
+          if (score > bestScore || (score === bestScore && dist < bestDist)) {
+            bestScore = score;
+            bestDist = dist;
+            chosen = k;
+          }
         }
       }
-      const centerSample = samples[Math.round((peakStart + peakEnd) / 2)];
-      candidates.push({ angle: centerSample.angle, count: peakCount, enemies: this.resolveChain(target, centerSample.angle) });
+      if (chosen === -1) {
+        let peakCount = 0;
+        for (let k = i; k < j; k++) {
+          peakCount = Math.max(peakCount, samples[k].enemies.length);
+        }
+        let peakStart = -1;
+        let peakEnd = -1;
+        for (let k = i; k < j; k++) {
+          if (samples[k].enemies.length === peakCount) {
+            if (peakStart === -1) {
+              peakStart = k;
+            }
+            peakEnd = k;
+          }
+        }
+        chosen = Math.round((peakStart + peakEnd) / 2);
+      }
+
+      const s = samples[chosen];
+      candidates.push({ angle: s.angle, count: s.enemies.length, enemies: s.enemies });
       i = j;
     }
     return candidates;
@@ -511,11 +611,6 @@ export class TimeManager {
       }
     }
     return enemies;
-  }
-
-  /** Total enemies a deflect off projectile at the given angle would hit - see resolveChain. */
-  private countChainedHits(projectile: TimeProjectile, angle: number): number {
-    return this.resolveChain(projectile, angle).length;
   }
 
   private drawPreviewRing(x: number, y: number, radius: number, alpha: number): void {
