@@ -8,12 +8,21 @@ import { SeededRandom } from "./SeededRandom";
 
 const ENEMY_POOL_SIZE = 20;
 const ENEMY_SPAWN_INTERVAL_MS = 1500;
-const INITIAL_ENEMY_COUNT = 3;
+/**
+ * The run always starts with exactly this many enemies, and a kill that
+ * would drop the alive count below it immediately spawns a replacement
+ * (see topUpToMinimumEnemies) - the timed spawn (trySpawnEnemy) can still
+ * grow the count past this on its own, this is only ever a floor.
+ */
+const MIN_ENEMIES_ALIVE = 4;
 /** Rejection-sample radius around the player - keeps a freshly-spawned enemy from appearing right on top of you. */
 const ENEMY_MIN_SPAWN_DIST_FROM_PLAYER = 140;
 /** Rejection-sample radius around every other alive enemy - keeps two enemies from spawning on top of (or touching) each other. Comfortably more than 2x Enemy.RADIUS (28) so they land visibly separated, not just non-overlapping. */
 const ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES = 50;
-const MAX_SPAWN_ATTEMPTS = 20;
+/** Same idea, but much larger and used only for the run's starting enemies (see spawnInitialEnemies) - the periodic in-run spacing above is fine for enemies trickling in one at a time, but all of the starting enemies land at once, so they need real separation to not read as a single clump. */
+const INITIAL_ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES = 160;
+/** Generous enough that the tighter INITIAL_ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES constraint still reliably finds a valid spot for every starting enemy. */
+const MAX_SPAWN_ATTEMPTS = 60;
 
 const PROJECTILE_POOL_SIZE = 60;
 const PROJECTILE_RADIUS = 7;
@@ -141,10 +150,22 @@ export class TimeManager {
     return this.enemyPool.filter((e) => e.isAlive).length;
   }
 
-  /** Spawns the run's starting enemies immediately, same placement rules as a normal timed spawn. */
+  /**
+   * Spawns the run's starting enemies immediately, spaced well apart from
+   * each other (INITIAL_ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES - wider than
+   * the normal in-run spacing, since these all land at once rather than
+   * trickling in one at a time) - and has each one fire off its first shot
+   * right away too (see Enemy.fireImmediately), so the very first frame
+   * already has real projectiles in flight instead of a guaranteed quiet
+   * opening while every enemy's cooldown winds up for the first time.
+   */
   spawnInitialEnemies(playerX: number, playerY: number): void {
-    for (let i = 0; i < INITIAL_ENEMY_COUNT; i++) {
-      this.spawnOneEnemy(playerX, playerY);
+    for (let i = 0; i < MIN_ENEMIES_ALIVE; i++) {
+      const enemy = this.spawnOneEnemy(playerX, playerY, INITIAL_ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES);
+      if (enemy) {
+        const angle = enemy.fireImmediately(playerX, playerY);
+        this.fireProjectile(enemy.x, enemy.y, angle);
+      }
     }
   }
 
@@ -172,7 +193,9 @@ export class TimeManager {
       }
     }
 
-    return this.checkDeflectedKills();
+    const kills = this.checkDeflectedKills();
+    this.topUpToMinimumEnemies(playerX, playerY);
+    return kills;
   }
 
   /** Deflects a hostile projectile in range (or re-deflects an already-deflected one that's bounced off an enemy since - see TimeProjectile.isReDeflectable), or kills an enemy in range outright (one hit). Returns how many enemies were killed this way (scores the same as a deflected-projectile kill). */
@@ -211,6 +234,7 @@ export class TimeManager {
         enemyKills++;
       }
     }
+    this.topUpToMinimumEnemies(hitbox.x, hitbox.y);
     return enemyKills;
   }
 
@@ -470,11 +494,20 @@ export class TimeManager {
     this.spawnOneEnemy(playerX, playerY);
   }
 
-  /** Activates one free enemy at a random point in the arena, rejection-sampled to stay at least ENEMY_MIN_SPAWN_DIST_FROM_PLAYER from the player and ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES from every other alive enemy. No-op if the pool is full or no valid spot is found within MAX_SPAWN_ATTEMPTS. */
-  private spawnOneEnemy(playerX: number, playerY: number): void {
+  /** Spawns enemies (with the normal in-run spacing, not the wider initial one) until the alive count is back up to MIN_ENEMIES_ALIVE - call this after anything that might have killed an enemy. Stops early (rather than looping forever) if a spawn attempt fails to find room, same as any other spawn. */
+  private topUpToMinimumEnemies(playerX: number, playerY: number): void {
+    while (this.enemiesAlive < MIN_ENEMIES_ALIVE) {
+      if (!this.spawnOneEnemy(playerX, playerY)) {
+        break;
+      }
+    }
+  }
+
+  /** Activates one free enemy at a random point in the arena, rejection-sampled to stay at least ENEMY_MIN_SPAWN_DIST_FROM_PLAYER from the player and minDistFromOtherEnemies from every other alive enemy. Returns the activated enemy, or null if the pool is full or no valid spot was found within MAX_SPAWN_ATTEMPTS. */
+  private spawnOneEnemy(playerX: number, playerY: number, minDistFromOtherEnemies = ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES): Enemy | null {
     const enemy = this.enemyPool.find((e) => !e.isAlive);
     if (!enemy) {
-      return;
+      return null;
     }
 
     for (let attempt = 0; attempt < MAX_SPAWN_ATTEMPTS; attempt++) {
@@ -487,22 +520,23 @@ export class TimeManager {
       if (distFromPlayer < ENEMY_MIN_SPAWN_DIST_FROM_PLAYER) {
         continue;
       }
-      if (this.isTooCloseToOtherEnemy(x, y)) {
+      if (this.isTooCloseToOtherEnemy(x, y, minDistFromOtherEnemies)) {
         continue;
       }
       enemy.activate(x, y);
-      return;
+      return enemy;
     }
+    return null;
   }
 
-  private isTooCloseToOtherEnemy(x: number, y: number): boolean {
+  private isTooCloseToOtherEnemy(x: number, y: number, minDistFromOtherEnemies: number): boolean {
     for (const other of this.enemyPool) {
       if (!other.isAlive) {
         continue;
       }
       const dx = other.x - x;
       const dy = other.y - y;
-      if (dx * dx + dy * dy < ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES * ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES) {
+      if (dx * dx + dy * dy < minDistFromOtherEnemies * minDistFromOtherEnemies) {
         return true;
       }
     }

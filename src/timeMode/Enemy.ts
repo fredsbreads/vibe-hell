@@ -70,6 +70,24 @@ export class Enemy extends Phaser.GameObjects.Image {
   }
 
   /**
+   * Simulates this enemy having JUST completed a fire cycle at the moment
+   * it spawns - used only for the run's starting enemies (see
+   * TimeManager.spawnInitialEnemies), so the very first frame already has
+   * real projectiles in flight instead of every enemy sitting silent
+   * through a full FIRE_INTERVAL_MS + telegraph before ever firing. Same
+   * aim-imperfection math step() uses for a normal shot (consumes one RNG
+   * draw); the caller is responsible for actually spawning the projectile.
+   * No cooldown/telegraph state to reset here - activate() (called right
+   * before this) already leaves fireCooldownRemainingMs at a full
+   * FIRE_INTERVAL_MS and telegraphActive false, exactly the resting state a
+   * real fire cycle ends in.
+   */
+  fireImmediately(playerX: number, playerY: number): number {
+    const trueAngle = Math.atan2(playerY - this.y, playerX - this.x);
+    return trueAngle + (this.rng.next() * 2 - 1) * AIM_IMPERFECTION_RAD;
+  }
+
+  /**
    * Advances the fire cooldown by the caller's world-scaled delta, and the
    * wind-up visual (tint/scale pulsing toward CHARGED_COLOR) once telegraphing
    * starts. Returns the angle to fire at once the cooldown elapses, or null

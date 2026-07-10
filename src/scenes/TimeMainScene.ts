@@ -342,7 +342,6 @@ export class TimeMainScene extends Phaser.Scene {
     }
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.replayEnemiesDefeated}`);
-    this.timescaleText.setText(`world: ${Math.round(this.player.worldTimescale * 100)}%`);
     const dashLabel =
       this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
     const slashLabel =
@@ -505,6 +504,10 @@ export class TimeMainScene extends Phaser.Scene {
     // buttons right under the title) - the full hint text is sized/positioned
     // for the old full-screen centered menu and would clutter the small panel.
     this.showGameOverMenu();
+    // The world-timescale readout isn't drawn during the replay at all (see
+    // updateReplay) - clear it once here instead of leaving it frozen on
+    // whatever it last showed live.
+    this.timescaleText.setText("");
 
     this.replaySource = new RecordedInputSource(this.recordedFrames);
     this.player.setInputSource(this.replaySource);
