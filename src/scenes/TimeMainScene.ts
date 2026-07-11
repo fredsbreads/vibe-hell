@@ -233,10 +233,13 @@ export class TimeMainScene extends Phaser.Scene {
     this.arena.update(worldScaledDelta);
 
     const deflectedKills = this.timeManager.update(delta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
+    this.player.setMaxDashCharges(Math.max(1, this.timeManager.liveMaxChainCount));
     if (deflectedKills > 0) {
       // Reward a successful deflect chain with another swing right away,
-      // instead of making the player wait out Slash's full cooldown.
+      // instead of making the player wait out Slash's full cooldown - and
+      // likewise hand back a dash immediately (see resetDashCooldown).
       this.player.resetSlashCooldown();
+      this.player.resetDashCooldown();
     }
     const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
     this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), delta);
@@ -253,8 +256,7 @@ export class TimeMainScene extends Phaser.Scene {
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.enemiesDefeated}`);
     this.timescaleText.setText(`world: ${Math.round(worldTimescale * 100)}%`);
-    const dashLabel =
-      this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
+    const dashLabel = this.buildDashLabel();
     const slashLabel =
       this.player.slashCooldownRemainingSec > 0 ? `SLASH: ${this.player.slashCooldownRemainingSec.toFixed(1)}s` : "SLASH: READY";
     this.statusText.setText(`${dashLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
@@ -341,8 +343,10 @@ export class TimeMainScene extends Phaser.Scene {
       this.replayWorldTimeBudgetMs -= worldScaledDelta;
 
       const deflectedKills = this.timeManager.update(stepDelta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
+      this.player.setMaxDashCharges(Math.max(1, this.timeManager.liveMaxChainCount));
       if (deflectedKills > 0) {
         this.player.resetSlashCooldown();
+        this.player.resetDashCooldown();
       }
       const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
       this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), stepDelta);
@@ -356,8 +360,7 @@ export class TimeMainScene extends Phaser.Scene {
     }
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.replayEnemiesDefeated}`);
-    const dashLabel =
-      this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
+    const dashLabel = this.buildDashLabel();
     const slashLabel =
       this.player.slashCooldownRemainingSec > 0 ? `SLASH: ${this.player.slashCooldownRemainingSec.toFixed(1)}s` : "SLASH: READY";
     this.statusText.setText(`${dashLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
@@ -552,6 +555,21 @@ export class TimeMainScene extends Phaser.Scene {
 
   private goToMainMenu(): void {
     this.scene.start("TimeTitleScene");
+  }
+
+  /**
+   * "DASH: READY"/"DASH: 1.2s" whenever maxDashCharges is still the baseline
+   * of 1 - identical to the label before dash charges existed. Once a
+   * deflected-projectile chain has pushed the ceiling above 1, switches to a
+   * fraction (e.g. "DASH: 3/4") so the banked bonus charges are actually
+   * visible, since "READY"/a cooldown timer alone can't distinguish 1 banked
+   * dash from 4.
+   */
+  private buildDashLabel(): string {
+    if (this.player.maxDashCharges > 1) {
+      return `DASH: ${this.player.dashChargesAvailable}/${this.player.maxDashCharges}`;
+    }
+    return this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
   }
 
   private redrawArenaOutline(): void {

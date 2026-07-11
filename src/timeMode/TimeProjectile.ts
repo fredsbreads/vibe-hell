@@ -117,6 +117,15 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private bouncedOffEnemySinceDeflect = false;
   /** Which swing (see SlashHitbox.swingId) last deflected this projectile - see wasHitBySwing(). */
   private lastHitSwingId = -1;
+  /**
+   * How many enemies this projectile has bounced off (killed) since it was
+   * first deflected - persists across re-deflects (a re-aim doesn't reset the
+   * chain, it's still the same flight), reset only in activate(), i.e. when
+   * this pooled instance becomes a brand new hostile shot. Drives the
+   * player's bonus dash charges - see TimeManager.liveMaxChainCount and
+   * TimePlayer.setMaxDashCharges.
+   */
+  private chainHitCount = 0;
 
   /** Recent velocity headings (radians), oldest first, sampled every tailSegmentLength of travel - see the TAIL_BASE_LENGTH doc comment above. */
   private readonly headingHistory: number[] = [];
@@ -146,6 +155,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.deflectBurstRemainingMs = 0;
     this.bouncedOffEnemySinceDeflect = false;
     this.lastHitSwingId = -1;
+    this.chainHitCount = 0;
     this.headingHistory.length = 0;
     this.headingHistory.push(aimAngle);
     this.distanceSinceLastSample = 0;
@@ -187,6 +197,11 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   /** True if a swing with this exact swingId already deflected this projectile - a swing's hitbox stays active across several frames, and the projectile could become isReDeflectable again (bounce off an enemy) mid-swing, so this stops that same physical swing from hitting it twice. See SlashHitbox.swingId. */
   wasHitBySwing(swingId: number): boolean {
     return this.lastHitSwingId === swingId;
+  }
+
+  /** How many enemies this projectile has bounced off (killed) since it was first deflected - see chainHitCount's doc comment. */
+  get chainKillCount(): number {
+    return this.chainHitCount;
   }
 
   /** The speed this projectile would fly off at if deflected right now - exposed for the "would this get deflected" QoL preview, so it can telegraph a faster post-deflect speed (e.g. a zoomer) with a longer trajectory line, and so a chain of redeflects reads as compounding rather than resetting. */
@@ -255,6 +270,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     if (this.isDeflected) {
       this.wallBounceCount = 0;
       this.bouncedOffEnemySinceDeflect = true;
+      this.chainHitCount++;
       this.setTintFill(this.currentTintColor);
     }
   }

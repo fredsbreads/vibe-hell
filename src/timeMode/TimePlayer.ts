@@ -99,6 +99,19 @@ export class TimePlayer {
   private dashTimeRemainingMs = 0;
   private dashLockoutRemainingMs = 0;
   private dashIframeTailRemainingMs = 0;
+  /**
+   * How many dashes are currently banked and spendable right now - normally
+   * 1 (see maxDashChargesValue), but can rise above that off the back of a
+   * deflected-projectile kill chain (see setMaxDashCharges). Spending one
+   * (see startDash) never has its own individual cooldown while charges
+   * remain above 0 - only once it bottoms out at 0 does dashLockoutRemainingMs
+   * start ticking again, to regenerate back up to the baseline of 1 (see
+   * tickCooldowns). This baseline regen is exactly the original single-dash
+   * cooldown behavior; the chain mechanic only ever adds to it.
+   */
+  private dashCharges = 1;
+  /** The current ceiling on dashCharges - always max(1, TimeManager.liveMaxChainCount), kept in sync every frame by the caller via setMaxDashCharges. */
+  private maxDashChargesValue = 1;
 
   private slashAngle = 0;
   private slashActiveRemainingMs = 0;
@@ -255,6 +268,8 @@ export class TimePlayer {
     this.dashTimeRemainingMs = 0;
     this.dashLockoutRemainingMs = 0;
     this.dashIframeTailRemainingMs = 0;
+    this.dashCharges = 1;
+    this.maxDashChargesValue = 1;
 
     this.slashAngle = 0;
     this.slashActiveRemainingMs = 0;
@@ -268,9 +283,19 @@ export class TimePlayer {
     this.lastInputStateValue = null;
   }
 
-  /** Seconds of Dash lockout remaining (world-time-scaled), 0 if ready. */
+  /** Seconds until the baseline dash charge (see dashCharges' doc comment) regenerates, 0 if a charge is already available. */
   get dashCooldownRemainingSec(): number {
     return this.dashLockoutRemainingMs / 1000;
+  }
+
+  /** How many dashes are banked and spendable right now. */
+  get dashChargesAvailable(): number {
+    return this.dashCharges;
+  }
+
+  /** The current ceiling on dashChargesAvailable - see setMaxDashCharges. */
+  get maxDashCharges(): number {
+    return this.maxDashChargesValue;
   }
 
   /** Seconds of Slash cooldown remaining (world-time-scaled), 0 if ready. */
@@ -342,8 +367,46 @@ export class TimePlayer {
     this.slashCooldownRemainingMs = Math.min(this.slashCooldownRemainingMs, this.slashActiveRemainingMs);
   }
 
+  /**
+   * Immediately clears the baseline dash regen wait and guarantees at least
+   * one dash is ready - call this the instant any deflected projectile hits
+   * an enemy (same trigger, same call site, as resetSlashCooldown), so a
+   * successful deflect chain also hands back a dash right away instead of
+   * making the player wait out the regen timer. Doesn't touch dashCharges if
+   * one's already banked - see setMaxDashCharges for how the chain's actual
+   * charge COUNT gets synced.
+   */
+  resetDashCooldown(): void {
+    this.dashLockoutRemainingMs = 0;
+    if (this.dashCharges < 1) {
+      this.dashCharges = 1;
+    }
+  }
+
+  /**
+   * Keeps dashCharges' ceiling in sync with the live deflected-projectile
+   * chain (see TimeManager.liveMaxChainCount) - call every frame with
+   * Math.max(1, that count). A no-op unless the ceiling actually changed
+   * since last frame: rising snaps dashCharges straight up to the new max
+   * (a fresh chain hit hands over that many usable dashes immediately, no
+   * waiting), falling - the chain's source projectile despawned - resets
+   * dashCharges straight down (or back up) to the new max just as
+   * immediately, per "if the projectile despawns, their dashes reset."
+   * Deliberately snaps rather than clamping the existing count: landing
+   * exactly on the new ceiling either way is what makes both directions read
+   * as one consistent "reset," not two different rules.
+   */
+  setMaxDashCharges(maxCharges: number): void {
+    if (maxCharges === this.maxDashChargesValue) {
+      return;
+    }
+    this.maxDashChargesValue = maxCharges;
+    this.dashCharges = maxCharges;
+    this.dashLockoutRemainingMs = 0;
+  }
+
   private canDash(): boolean {
-    return this.dashLockoutRemainingMs <= 0;
+    return this.dashCharges > 0 && !this.isDashing;
   }
 
   private canSlash(): boolean {
@@ -360,7 +423,12 @@ export class TimePlayer {
 
     this.isDashing = true;
     this.dashTimeRemainingMs = DASH_DURATION_MS;
-    this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
+    this.dashCharges--;
+    if (this.dashCharges < 1) {
+      // Out of banked charges - fall back to the baseline regen timer, same
+      // lockout duration the original single-dash design always used.
+      this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
+    }
     this.velocityX = dashVelocity.x;
     this.velocityY = dashVelocity.y;
     this.sprite.setTint(DASH_TINT);
@@ -473,6 +541,9 @@ export class TimePlayer {
   private tickCooldowns(realDelta: number, worldScaledDelta: number): void {
     if (this.dashLockoutRemainingMs > 0) {
       this.dashLockoutRemainingMs = Math.max(0, this.dashLockoutRemainingMs - worldScaledDelta);
+      if (this.dashLockoutRemainingMs <= 0 && this.dashCharges < 1) {
+        this.dashCharges = 1;
+      }
     }
     if (this.dashIframeTailRemainingMs > 0) {
       this.dashIframeTailRemainingMs = Math.max(0, this.dashIframeTailRemainingMs - realDelta);

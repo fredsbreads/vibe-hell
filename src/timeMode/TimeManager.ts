@@ -151,6 +151,24 @@ export class TimeManager {
   }
 
   /**
+   * The highest chain-kill count across every currently active deflected
+   * projectile (0 if none are active/deflected) - the player's bonus dash
+   * charges track this directly (see TimePlayer.setMaxDashCharges), so a
+   * projectile that's bounced through several enemies grants that many
+   * dashes, and losing every such projectile (they despawn) drops it back to
+   * 0 - the caller is responsible for flooring that at 1.
+   */
+  get liveMaxChainCount(): number {
+    let max = 0;
+    for (const projectile of this.projectilePool) {
+      if (projectile.active && projectile.deflected && projectile.chainKillCount > max) {
+        max = projectile.chainKillCount;
+      }
+    }
+    return max;
+  }
+
+  /**
    * Spawns the run's starting enemies immediately, spaced well apart from
    * each other (INITIAL_ENEMY_MIN_SPAWN_DIST_FROM_OTHER_ENEMIES - wider than
    * the normal in-run spacing, since these all land at once rather than
