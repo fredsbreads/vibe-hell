@@ -176,9 +176,19 @@ export class TimePlayer {
     // already-recorded input), which is what makes the replay's enemy
     // spawns/projectile timing/RNG draws actually match what really
     // happened, instead of a different run that just started from the same
-    // seed. See TimeMainScene's REPLAY_STEPS_PER_FRAME for how the replay
-    // still plays back faster than the original run without touching this.
-    this.worldTimescaleValue = computeWorldTimescale(state.moveX, state.moveY);
+    // seed. See TimeMainScene's updateReplay for how the replay still plays
+    // back faster than the original run without touching this.
+    //
+    // While dashing, though, the stick is treated as neutral regardless of
+    // what it's actually doing - a dash already moves the player at a fixed
+    // speed of its own (see startDash), ignoring the held direction, so
+    // letting a held stick ALSO keep the world moving during the dash would
+    // let players get dash's full i-frames/burst AND world-time progress at
+    // the same time just by holding a direction through it. Standing still
+    // (or dashing) should read as "the world waits for you" consistently,
+    // not conditionally on whether a direction happens to still be held.
+    const willDashThisFrame = this.isDashing || (state.dashPressed && this.canDash());
+    this.worldTimescaleValue = willDashThisFrame ? computeWorldTimescale(0, 0) : computeWorldTimescale(state.moveX, state.moveY);
     const worldScaledDelta = realDelta * this.worldTimescaleValue;
 
     this.tickCooldowns(realDelta, worldScaledDelta);
