@@ -102,12 +102,15 @@ export class TimePlayer {
   /**
    * How many dashes are currently banked and spendable right now - normally
    * 1 (see maxDashChargesValue), but can rise above that off the back of a
-   * deflected-projectile kill chain (see setMaxDashCharges). Spending one
-   * (see startDash) never has its own individual cooldown while charges
-   * remain above 0 - only once it bottoms out at 0 does dashLockoutRemainingMs
-   * start ticking again, to regenerate back up to the baseline of 1 (see
-   * tickCooldowns). This baseline regen is exactly the original single-dash
-   * cooldown behavior; the chain mechanic only ever adds to it.
+   * deflected-projectile kill chain (see setMaxDashCharges). Spending charges
+   * (see startDash) is always free - no individual cooldown as long as any
+   * remain. Once below maxDashChargesValue, though, dashLockoutRemainingMs
+   * ticks down to regenerate exactly one charge at a time (see
+   * tickCooldowns), same DASH_LOCKOUT_MS pace as the original single-dash
+   * cooldown, restarting for the next charge each time one comes back, until
+   * charges is back at the cap. So: no cooldown to USE a banked charge, but
+   * still a cooldown to REGAIN each spent one, up to whatever the current
+   * cap is.
    */
   private dashCharges = 1;
   /** The current ceiling on dashCharges - always max(1, TimeManager.liveMaxChainCount), kept in sync every frame by the caller via setMaxDashCharges. */
@@ -368,18 +371,22 @@ export class TimePlayer {
   }
 
   /**
-   * Immediately clears the baseline dash regen wait and guarantees at least
-   * one dash is ready - call this the instant any deflected projectile hits
-   * an enemy (same trigger, same call site, as resetSlashCooldown), so a
-   * successful deflect chain also hands back a dash right away instead of
-   * making the player wait out the regen timer. Doesn't touch dashCharges if
-   * one's already banked - see setMaxDashCharges for how the chain's actual
-   * charge COUNT gets synced.
+   * Instantly completes the currently-regenerating charge (if any charge is
+   * missing) instead of making it wait out the rest of its timer - call this
+   * the instant any deflected projectile hits an enemy (same trigger, same
+   * call site, as resetSlashCooldown), so a successful hit hands back a dash
+   * right away. If that still leaves charges below the cap, the next one
+   * starts its own fresh timer immediately after, same as a normal regen
+   * tick (see tickCooldowns) - this only ever grants ONE charge per call, it
+   * doesn't fully refill to the cap (see setMaxDashCharges for the "at that
+   * moment" full top-up when the cap itself grows).
    */
   resetDashCooldown(): void {
-    this.dashLockoutRemainingMs = 0;
-    if (this.dashCharges < 1) {
-      this.dashCharges = 1;
+    if (this.dashCharges < this.maxDashChargesValue) {
+      this.dashCharges++;
+      this.dashLockoutRemainingMs = this.dashCharges < this.maxDashChargesValue ? DASH_LOCKOUT_MS : 0;
+    } else {
+      this.dashLockoutRemainingMs = 0;
     }
   }
 
@@ -424,9 +431,9 @@ export class TimePlayer {
     this.isDashing = true;
     this.dashTimeRemainingMs = DASH_DURATION_MS;
     this.dashCharges--;
-    if (this.dashCharges < 1) {
-      // Out of banked charges - fall back to the baseline regen timer, same
-      // lockout duration the original single-dash design always used.
+    if (this.dashLockoutRemainingMs <= 0 && this.dashCharges < this.maxDashChargesValue) {
+      // Below the current cap and no regen already in flight - start one
+      // (only one charge regenerates at a time, see tickCooldowns).
       this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
     }
     this.velocityX = dashVelocity.x;
@@ -541,8 +548,11 @@ export class TimePlayer {
   private tickCooldowns(realDelta: number, worldScaledDelta: number): void {
     if (this.dashLockoutRemainingMs > 0) {
       this.dashLockoutRemainingMs = Math.max(0, this.dashLockoutRemainingMs - worldScaledDelta);
-      if (this.dashLockoutRemainingMs <= 0 && this.dashCharges < 1) {
-        this.dashCharges = 1;
+      if (this.dashLockoutRemainingMs <= 0 && this.dashCharges < this.maxDashChargesValue) {
+        this.dashCharges++;
+        // Still below the cap after regenerating this one - start the next
+        // charge's timer right away rather than waiting a frame.
+        this.dashLockoutRemainingMs = this.dashCharges < this.maxDashChargesValue ? DASH_LOCKOUT_MS : 0;
       }
     }
     if (this.dashIframeTailRemainingMs > 0) {
