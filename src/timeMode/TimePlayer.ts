@@ -3,6 +3,7 @@ import { PlayerInput, InputSource, InputState } from "../input/PlayerInput";
 import { Arena } from "../arena/Arena";
 import { computeWorldTimescale } from "./worldClock";
 import { getShowSlashRangeIndicator } from "../config/settings";
+import { playDash, playSlash, playDeath, playChargeBanked, playChargeRegen } from "../audio/sfx";
 
 const DASH_TINT = 0xaefff0;
 const HURT_TINT = 0xff3b3b;
@@ -317,6 +318,7 @@ export class TimePlayer {
   takeDamage(): void {
     this.dead = true;
     this.sprite.setTint(HURT_TINT);
+    playDeath();
   }
 
   getActiveSlashHitbox(): SlashHitbox | null {
@@ -407,6 +409,9 @@ export class TimePlayer {
     if (maxCharges === this.maxDashChargesValue) {
       return;
     }
+    if (maxCharges > this.maxDashChargesValue) {
+      playChargeBanked();
+    }
     this.maxDashChargesValue = maxCharges;
     this.dashCharges = maxCharges;
     this.dashLockoutRemainingMs = 0;
@@ -440,6 +445,7 @@ export class TimePlayer {
     this.velocityY = dashVelocity.y;
     this.sprite.setTint(DASH_TINT);
     this.spawnDashGhost();
+    playDash();
   }
 
   private updateDash(realDelta: number): void {
@@ -475,6 +481,7 @@ export class TimePlayer {
     this.slashCooldownRemainingMs = SLASH_COOLDOWN_MS;
     this.swingId++;
     this.redrawSlashArc();
+    playSlash();
   }
 
   private updateSlash(realDelta: number): void {
@@ -550,6 +557,7 @@ export class TimePlayer {
       this.dashLockoutRemainingMs = Math.max(0, this.dashLockoutRemainingMs - worldScaledDelta);
       if (this.dashLockoutRemainingMs <= 0 && this.dashCharges < this.maxDashChargesValue) {
         this.dashCharges++;
+        playChargeRegen();
         // Still below the cap after regenerating this one - start the next
         // charge's timer right away rather than waiting a frame.
         this.dashLockoutRemainingMs = this.dashCharges < this.maxDashChargesValue ? DASH_LOCKOUT_MS : 0;

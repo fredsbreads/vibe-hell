@@ -5,6 +5,7 @@ import { TimeProjectile, ProjectileKind, BASE_DEFLECT_SPEED, DEFLECT_MAX_WALL_BO
 import { SlashHitbox } from "./TimePlayer";
 import { spawnPop } from "../effects/spawnPop";
 import { SeededRandom } from "./SeededRandom";
+import { playDeflect, playKill, playChainHit } from "../audio/sfx";
 
 const ENEMY_POOL_SIZE = 20;
 const ENEMY_SPAWN_INTERVAL_MS = 1500;
@@ -238,6 +239,7 @@ export class TimeManager {
       if (this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, hitbox)) {
         spawnPop(this.scene, projectile.x, projectile.y, DEFLECT_POP_COLOR);
         projectile.deflect(hitbox.angle, hitbox.swingId);
+        playDeflect();
       }
     }
 
@@ -250,6 +252,7 @@ export class TimeManager {
         spawnPop(this.scene, enemy.x, enemy.y, KILL_POP_COLOR);
         enemy.deactivate();
         enemyKills++;
+        playKill();
       }
     }
     this.topUpToMinimumEnemies(hitbox.x, hitbox.y);
@@ -604,6 +607,7 @@ export class TimeManager {
           spawnPop(this.scene, hostile.x, hostile.y, KILL_POP_COLOR);
           hostile.deactivate();
           kills++;
+          playKill();
         }
       }
       for (const enemy of this.enemyPool) {
@@ -626,6 +630,7 @@ export class TimeManager {
           // rather than consuming it (see TimeProjectile.bounceOffPoint) -
           // enemy bounces are unlimited, wall bounces are the limited part.
           deflected.bounceOffPoint(enemyX, enemyY);
+          playChainHit(deflected.chainKillCount);
           break;
         }
       }

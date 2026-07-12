@@ -10,6 +10,7 @@ import { getShowSlashRangeIndicator, setShowSlashRangeIndicator } from "../confi
 import { RecordedFrame, RecordedInputSource } from "../timeMode/ReplayRecorder";
 import { randomSeed } from "../timeMode/SeededRandom";
 import { computeWorldTimescale } from "../timeMode/worldClock";
+import { playReplayStart } from "../audio/sfx";
 
 type UiState = "playing" | "paused" | "gameOver";
 
@@ -517,6 +518,7 @@ export class TimeMainScene extends Phaser.Scene {
     // the compact corner menu, unlike the full-screen Pause overlay.
     this.cameras.main.shake(DEATH_SHAKE_DURATION_MS, DEATH_SHAKE_INTENSITY);
     this.cameras.main.flash(DEATH_FLASH_DURATION_MS, 255, 59, 59);
+    playReplayStart();
     // The compact corner menu is self-explanatory (two clickable/highlightable
     // buttons right under the title) - the full hint text is sized/positioned
     // for the old full-screen centered menu and would clutter the small panel.
