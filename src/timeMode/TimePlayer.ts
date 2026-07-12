@@ -78,6 +78,9 @@ export class TimePlayer {
   private readonly aimIndicator: Phaser.GameObjects.Graphics;
   private readonly slashGraphic: Phaser.GameObjects.Graphics;
   private readonly slashRangeGraphic: Phaser.GameObjects.Graphics;
+  private readonly dashChargeAura: Phaser.GameObjects.Graphics;
+  /** Drives the dash-charge aura's pulse (see redrawDashChargeAura) - real-time, like the slash preview's own pulse, since it's a cosmetic readout rather than part of "the world". */
+  private auraPulseMs = 0;
 
   /**
    * Current velocity, applied to sprite.x/y by hand each update() call
@@ -143,6 +146,8 @@ export class TimePlayer {
     this.aimIndicator = scene.add.graphics();
     this.slashGraphic = scene.add.graphics();
     this.slashRangeGraphic = scene.add.graphics();
+    this.dashChargeAura = scene.add.graphics();
+    this.dashChargeAura.setDepth(4);
   }
 
   /** The world timescale computed from this frame's raw stick input - read this AFTER calling update(), and use it to step everything else ("the world") this same frame. */
@@ -240,9 +245,12 @@ export class TimePlayer {
     this.sprite.x += (this.velocityX * realDelta) / 1000;
     this.sprite.y += (this.velocityY * realDelta) / 1000;
 
+    this.auraPulseMs += realDelta;
+
     this.clampToArena();
     this.redrawAimIndicator();
     this.redrawSlashRangeIndicator();
+    this.redrawDashChargeAura();
   }
 
   private get position(): { x: number; y: number } {
@@ -274,6 +282,8 @@ export class TimePlayer {
     this.dashIframeTailRemainingMs = 0;
     this.dashCharges = 1;
     this.maxDashChargesValue = 1;
+    this.auraPulseMs = 0;
+    this.dashChargeAura.clear();
 
     this.slashAngle = 0;
     this.slashActiveRemainingMs = 0;
@@ -549,6 +559,38 @@ export class TimePlayer {
 
     this.slashRangeGraphic.lineBetween(x, y, x + Math.cos(startAngle) * SLASH_RANGE, y + Math.sin(startAngle) * SLASH_RANGE);
     this.slashRangeGraphic.lineBetween(x, y, x + Math.cos(endAngle) * SLASH_RANGE, y + Math.sin(endAngle) * SLASH_RANGE);
+  }
+
+  /**
+   * A pulsing ring (or several, for a bigger bank) around the player that
+   * only appears once a deflect chain has actually raised the dash-charge
+   * cap above the baseline of 1 - a visible "loaded" tell for the bonus
+   * mechanic, rather than a permanent fixture around the player during
+   * ordinary play. Ring count, pulse speed, and brightness all scale with
+   * dashCharges, so a bigger bank reads as more charged up at a glance.
+   * Not suppressed during the death replay - unlike the slash-range
+   * indicator, this isn't informing a live decision, it's just presentation
+   * (same as the dash ghost trail or slash flash, which also still play
+   * back).
+   */
+  private redrawDashChargeAura(): void {
+    this.dashChargeAura.clear();
+    if (this.maxDashChargesValue <= 1) {
+      return;
+    }
+    const pulseSpeed = 1.2 + this.dashCharges * 0.35;
+    const pulse = (Math.sin((this.auraPulseMs / 1000) * pulseSpeed * Math.PI * 2) + 1) / 2;
+    const ringCount = Math.min(4, Math.ceil(this.dashCharges / 2));
+    const { x, y } = this.position;
+    const baseR = TimePlayer.RADIUS * 1.3;
+
+    for (let i = 0; i < ringCount; i++) {
+      const spread = ringCount > 1 ? i / (ringCount - 1) : 0;
+      const radius = baseR * (1.3 + spread * 0.9 + pulse * 0.15);
+      const alpha = (0.5 - spread * 0.28) * (0.5 + pulse * 0.5) * Math.min(1, this.dashCharges / 3);
+      this.dashChargeAura.lineStyle(2, DASH_TINT, Math.max(0, alpha));
+      this.dashChargeAura.strokeCircle(x, y, radius);
+    }
   }
 
   /** Dash lockout and Slash cooldown tick on world-scaled time; everything else about the player stays on real time (see class doc comment). */

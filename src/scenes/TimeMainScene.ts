@@ -233,9 +233,9 @@ export class TimeMainScene extends Phaser.Scene {
 
     this.arena.update(worldScaledDelta);
 
-    const deflectedKills = this.timeManager.update(delta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
+    const deflectResult = this.timeManager.update(delta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
     this.player.setMaxDashCharges(Math.max(1, this.timeManager.liveMaxChainCount));
-    if (deflectedKills > 0) {
+    if (deflectResult.kills > 0) {
       // Reward a successful deflect chain with another swing right away,
       // instead of making the player wait out Slash's full cooldown - and
       // likewise hand back a dash immediately (see resetDashCooldown).
@@ -244,11 +244,15 @@ export class TimeMainScene extends Phaser.Scene {
     }
     const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
     this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), delta);
-    const killsThisFrame = deflectedKills + slashKills;
+    const killsThisFrame = deflectResult.kills + slashKills;
     this.enemiesDefeated += killsThisFrame;
     if (killsThisFrame > 0) {
-      this.hitStopRemainingMs = KILL_HIT_STOP_MS;
-      this.cameras.main.shake(KILL_SHAKE_DURATION_MS, KILL_SHAKE_INTENSITY);
+      // Scaled by the frame's longest deflect chain (1x if this frame's
+      // kills were all direct Slash kills / non-chain deflect kills) - a
+      // long chain reads as hitting harder, not just scoring more.
+      const scale = deflectResult.maxJuiceScale;
+      this.hitStopRemainingMs = KILL_HIT_STOP_MS * scale;
+      this.cameras.main.shake(KILL_SHAKE_DURATION_MS * scale, KILL_SHAKE_INTENSITY * scale);
     }
 
     if (!this.player.isInvincible && this.timeManager.checkPlayerHit(this.player.sprite.x, this.player.sprite.y, TimePlayer.RADIUS)) {
@@ -343,15 +347,15 @@ export class TimeMainScene extends Phaser.Scene {
       this.arena.update(worldScaledDelta);
       this.replayWorldTimeBudgetMs -= worldScaledDelta;
 
-      const deflectedKills = this.timeManager.update(stepDelta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
+      const deflectResult = this.timeManager.update(stepDelta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
       this.player.setMaxDashCharges(Math.max(1, this.timeManager.liveMaxChainCount));
-      if (deflectedKills > 0) {
+      if (deflectResult.kills > 0) {
         this.player.resetSlashCooldown();
         this.player.resetDashCooldown();
       }
       const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
       this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), stepDelta);
-      this.replayEnemiesDefeated += deflectedKills + slashKills;
+      this.replayEnemiesDefeated += deflectResult.kills + slashKills;
 
       if (!this.player.isInvincible && this.timeManager.checkPlayerHit(this.player.sprite.x, this.player.sprite.y, TimePlayer.RADIUS)) {
         this.player.takeDamage();

@@ -37,6 +37,28 @@ const KILL_POP_COLOR = 0xffe98a;
 const DEFLECT_POP_COLOR = 0x59f2c8;
 const HIT_POP_COLOR = 0xff3b3b;
 
+/** How many enemies a deflected projectile bounced off/killed this frame, and the resulting juice-intensity multiplier (see chainJuiceScale) to apply to hit-stop/camera-shake/kill-pop size - 1 (no scaling) whenever no chain kill happened this frame. */
+export interface DeflectFrameResult {
+  kills: number;
+  maxJuiceScale: number;
+}
+
+/**
+ * Chain length -> juice-intensity multiplier for hit-stop/camera-shake/
+ * kill-pop size. Linear from 1x at a chain of 1 up to 2x at a chain of 4
+ * (matching the player's own dash-charge example), then tapers
+ * asymptotically toward a 2.6x soft ceiling - so a long chain still reads
+ * as escalating well past 4, but an extreme outlier chain doesn't produce
+ * an absurd, nauseating amount of shake/freeze.
+ */
+function chainJuiceScale(chainCount: number): number {
+  const n = Math.max(1, chainCount);
+  if (n <= 4) {
+    return 1 + (n - 1) * (1 / 3);
+  }
+  return 2 + (1 - Math.exp(-(n - 4) / 3)) * 0.6;
+}
+
 /**
  * QoL "would this get deflected right now" preview - a highlight ring plus a
  * dashed line showing the trajectory a hit projectile would fly off along.
@@ -188,8 +210,8 @@ export class TimeManager {
     }
   }
 
-  /** Advances everything by one frame. realDelta drives the deflect burst window; worldScaledDelta drives every other movement/timer. Returns how many hostile projectiles/enemies a deflected projectile destroyed by contact this frame (scores the same as a direct Slash kill). */
-  update(realDelta: number, worldScaledDelta: number, playerX: number, playerY: number): number {
+  /** Advances everything by one frame. realDelta drives the deflect burst window; worldScaledDelta drives every other movement/timer. Returns how many hostile projectiles/enemies a deflected projectile destroyed by contact this frame (scores the same as a direct Slash kill), plus the juice-intensity multiplier the caller should apply this frame (see DeflectFrameResult). */
+  update(realDelta: number, worldScaledDelta: number, playerX: number, playerY: number): DeflectFrameResult {
     this.trySpawnEnemy(worldScaledDelta, playerX, playerY);
 
     for (const enemy of this.enemyPool) {
@@ -212,9 +234,9 @@ export class TimeManager {
       }
     }
 
-    const kills = this.checkDeflectedKills();
+    const result = this.checkDeflectedKills();
     this.topUpToMinimumEnemies(playerX, playerY);
-    return kills;
+    return result;
   }
 
   /** Deflects a hostile projectile in range (or re-deflects an already-deflected one that's bounced off an enemy since - see TimeProjectile.isReDeflectable), or kills an enemy in range outright (one hit). Returns how many enemies were killed this way (scores the same as a deflected-projectile kill). */
@@ -589,9 +611,10 @@ export class TimeManager {
     }
   }
 
-  /** A deflected/friendly projectile destroys any hostile projectile OR enemy it touches, for as long as it's alive. Returns how many kills happened this frame. */
-  private checkDeflectedKills(): number {
+  /** A deflected/friendly projectile destroys any hostile projectile OR enemy it touches, for as long as it's alive. Returns how many kills happened this frame, plus the juice-intensity multiplier the caller should apply (see DeflectFrameResult) - the highest chainJuiceScale among this frame's enemy-bounce kills, or 1 if none of this frame's kills were chain kills. */
+  private checkDeflectedKills(): DeflectFrameResult {
     let kills = 0;
+    let maxJuiceScale = 1;
     for (const deflected of this.projectilePool) {
       if (!deflected.active || !deflected.deflected) {
         continue;
@@ -618,7 +641,6 @@ export class TimeManager {
         const dy = enemy.y - deflected.y;
         const minDist = Enemy.RADIUS + deflected.radius;
         if (dx * dx + dy * dy <= minDist * minDist) {
-          spawnPop(this.scene, enemy.x, enemy.y, KILL_POP_COLOR);
           const enemyX = enemy.x;
           const enemyY = enemy.y;
           enemy.deactivate();
@@ -630,12 +652,18 @@ export class TimeManager {
           // rather than consuming it (see TimeProjectile.bounceOffPoint) -
           // enemy bounces are unlimited, wall bounces are the limited part.
           deflected.bounceOffPoint(enemyX, enemyY);
+          // chainKillCount is only correct AFTER bounceOffPoint (that's what
+          // increments it) - the pop size and chain-hit sound both need this
+          // kill's own resulting count, not the count before it.
+          const juiceScale = chainJuiceScale(deflected.chainKillCount);
+          maxJuiceScale = Math.max(maxJuiceScale, juiceScale);
+          spawnPop(this.scene, enemyX, enemyY, KILL_POP_COLOR, juiceScale);
           playChainHit(deflected.chainKillCount);
           break;
         }
       }
     }
-    return kills;
+    return { kills, maxJuiceScale };
   }
 
   /**
