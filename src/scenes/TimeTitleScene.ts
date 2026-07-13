@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { DualSenseMap, isPadButtonDown, getPadButtonValue } from "../input/DualSenseMap";
 import { TitleBackground } from "../timeMode/TitleBackground";
 import { MenuOverlay } from "../ui/MenuOverlay";
-import { getShowSlashRangeIndicator, setShowSlashRangeIndicator } from "../config/settings";
+import { getShowSlashRangeIndicator, setShowSlashRangeIndicator, getReplaySpeed, cycleReplaySpeed } from "../config/settings";
 
 const FOCUS_COLOR = "#ffe98a";
 /** Matches PlayerInput's own trigger threshold - R2 is analog, so "pressed" means past this value, not just nonzero. */
@@ -30,11 +30,15 @@ export class TimeTitleScene extends Phaser.Scene {
   private optionsKey!: Phaser.Input.Keyboard.Key;
   private menuUpKey!: Phaser.Input.Keyboard.Key;
   private menuDownKey!: Phaser.Input.Keyboard.Key;
+  private menuLeftKey!: Phaser.Input.Keyboard.Key;
+  private menuRightKey!: Phaser.Input.Keyboard.Key;
   private prevEscHeld = false;
   private prevConfirmHeld = false;
   private prevOptionsKeyHeld = false;
   private prevMenuUpHeld = false;
   private prevMenuDownHeld = false;
+  private prevMenuLeftHeld = false;
+  private prevMenuRightHeld = false;
 
   constructor() {
     super("TimeTitleScene");
@@ -83,6 +87,8 @@ export class TimeTitleScene extends Phaser.Scene {
     this.optionsKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.O);
     this.menuUpKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
     this.menuDownKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+    this.menuLeftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+    this.menuRightKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
 
     const pad = this.input.gamepad?.pad1;
     this.prevConfirmHeld = this.readConfirmHeld(pad);
@@ -117,6 +123,21 @@ export class TimeTitleScene extends Phaser.Scene {
       this.prevMenuDownHeld = downHeld;
       if (downPressed) {
         this.menuOverlay.moveFocus(1);
+      }
+
+      const stickX = pad?.leftStick.x ?? 0;
+      const leftHeld = this.menuLeftKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_LEFT) || stickX < -0.5;
+      const leftPressed = leftHeld && !this.prevMenuLeftHeld;
+      this.prevMenuLeftHeld = leftHeld;
+      if (leftPressed) {
+        this.menuOverlay.adjustFocused(-1);
+      }
+
+      const rightHeld = this.menuRightKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT) || stickX > 0.5;
+      const rightPressed = rightHeld && !this.prevMenuRightHeld;
+      this.prevMenuRightHeld = rightHeld;
+      if (rightPressed) {
+        this.menuOverlay.adjustFocused(1);
       }
 
       if (confirmPressed) {
@@ -187,21 +208,42 @@ export class TimeTitleScene extends Phaser.Scene {
     // immediately register as the first up/down/confirm inside the menu.
     this.prevMenuUpHeld = this.menuUpKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_UP) || stickY < -0.5;
     this.prevMenuDownHeld = this.menuDownKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_DOWN) || stickY > 0.5;
+    const stickX = pad?.leftStick.x ?? 0;
+    this.prevMenuLeftHeld = this.menuLeftKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_LEFT) || stickX < -0.5;
+    this.prevMenuRightHeld = this.menuRightKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT) || stickX > 0.5;
     this.prevConfirmHeld = this.readConfirmHeld(pad);
     this.showOptionsMenu();
   }
 
-  private showOptionsMenu(): void {
-    this.menuOverlay.show("OPTIONS", "", [
-      {
-        label: `SLASH RANGE INDICATOR: ${getShowSlashRangeIndicator() ? "ON" : "OFF"}`,
-        onSelect: () => {
-          setShowSlashRangeIndicator(!getShowSlashRangeIndicator());
-          this.showOptionsMenu();
+  /** preserveFocus is passed straight through to menuOverlay.show() - true when a toggle/onAdjust re-shows this same screen on itself, so the highlight doesn't jump back to the top mid-adjustment; false (the default) when actually entering OPTIONS fresh. */
+  private showOptionsMenu(preserveFocus = false): void {
+    this.menuOverlay.show(
+      "OPTIONS",
+      "",
+      [
+        {
+          label: `SLASH RANGE INDICATOR: ${getShowSlashRangeIndicator() ? "ON" : "OFF"}`,
+          onSelect: () => {
+            setShowSlashRangeIndicator(!getShowSlashRangeIndicator());
+            this.showOptionsMenu(true);
+          },
         },
-      },
-      { label: "BACK", onSelect: () => this.closeOptions() },
-    ]);
+        {
+          label: `DEATH REPLAY SPEED: ${getReplaySpeed()}x`,
+          onSelect: () => {
+            cycleReplaySpeed();
+            this.showOptionsMenu(true);
+          },
+          onAdjust: (direction) => {
+            cycleReplaySpeed(direction);
+            this.showOptionsMenu(true);
+          },
+        },
+        { label: "BACK", onSelect: () => this.closeOptions() },
+      ],
+      "center",
+      preserveFocus,
+    );
   }
 
   private closeOptions(): void {

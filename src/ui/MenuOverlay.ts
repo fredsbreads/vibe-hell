@@ -3,6 +3,14 @@ import Phaser from "phaser";
 export interface MenuButton {
   label: string;
   onSelect: () => void;
+  /**
+   * Called with -1 (left) or 1 (right) when this button is focused and the
+   * player presses D-Pad/stick/arrow-key left or right - for a button that
+   * represents an adjustable value (e.g. a numeric setting cycled through a
+   * fixed list) rather than a plain one-shot action. Optional: a button
+   * without this simply ignores left/right (see adjustFocused()).
+   */
+  onAdjust?: (direction: -1 | 1) => void;
 }
 
 type Layout = "center" | "corner";
@@ -95,7 +103,17 @@ export class MenuOverlay {
     this.hide();
   }
 
-  show(title: string, subtitle: string, buttons: MenuButton[], layout: Layout = "center"): void {
+  /**
+   * preserveFocus keeps whatever button index was already highlighted
+   * instead of resetting to 0 - pass true when re-showing the SAME menu
+   * after one of its own buttons changed something about itself (a toggle,
+   * or a value stepped via onAdjust), so pressing D-Pad right several times
+   * in a row to step through a value keeps landing on that same button
+   * instead of silently losing focus back to button 0 after the first
+   * press. Leave it false (the default) when opening a genuinely different
+   * menu, where starting back at the top is what you'd expect.
+   */
+  show(title: string, subtitle: string, buttons: MenuButton[], layout: Layout = "center", preserveFocus = false): void {
     this.destroyButtons();
 
     this.backdrop.setVisible(true);
@@ -103,7 +121,9 @@ export class MenuOverlay {
     this.subtitleText.setVisible(subtitle.length > 0).setText(subtitle);
 
     this.buttons = buttons;
-    this.focusedIndex = 0;
+    if (!preserveFocus || this.focusedIndex >= buttons.length) {
+      this.focusedIndex = 0;
+    }
     // Reset so the cursor's current resting position (e.g. left over from the
     // click that opened this menu) doesn't immediately register as "mouse
     // just moved" on the very first update() and steal focus off button 0.
@@ -200,6 +220,11 @@ export class MenuOverlay {
   /** Activates whichever button is currently highlighted, same as clicking it. */
   confirmFocused(): void {
     this.buttons[this.focusedIndex]?.onSelect();
+  }
+
+  /** Adjusts whichever button is currently highlighted, if it supports it (see MenuButton.onAdjust) - a no-op for buttons that don't. */
+  adjustFocused(direction: -1 | 1): void {
+    this.buttons[this.focusedIndex]?.onAdjust?.(direction);
   }
 
   /**

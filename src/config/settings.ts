@@ -41,11 +41,11 @@ export function getReplaySpeed(): number {
   return (REPLAY_SPEED_OPTIONS as readonly number[]).includes(stored) ? stored : 1;
 }
 
-/** Advances getReplaySpeed() to the next value in REPLAY_SPEED_OPTIONS, wrapping back to the first after the last - mirrors the SLASH RANGE INDICATOR toggle's "select cycles it, re-shows the menu" pattern. Returns the new value so the caller can redraw its label immediately. */
-export function cycleReplaySpeed(): number {
+/** Steps getReplaySpeed() by direction through REPLAY_SPEED_OPTIONS, wrapping at either end - defaults to advancing forward (1), matching the SLASH RANGE INDICATOR toggle's "select cycles it, re-shows the menu" pattern; pass -1 for D-Pad/stick/arrow-key left. Returns the new value so the caller can redraw its label immediately. */
+export function cycleReplaySpeed(direction: -1 | 1 = 1): number {
   const options = REPLAY_SPEED_OPTIONS;
   const index = options.indexOf(getReplaySpeed() as (typeof options)[number]);
-  const next = options[(index + 1) % options.length];
+  const next = options[(index + direction + options.length) % options.length];
   localStorage.setItem(REPLAY_SPEED_STORAGE_KEY, String(next));
   return next;
 }

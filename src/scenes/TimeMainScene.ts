@@ -80,11 +80,15 @@ export class TimeMainScene extends Phaser.Scene {
   private restartKey!: Phaser.Input.Keyboard.Key;
   private menuUpKey!: Phaser.Input.Keyboard.Key;
   private menuDownKey!: Phaser.Input.Keyboard.Key;
+  private menuLeftKey!: Phaser.Input.Keyboard.Key;
+  private menuRightKey!: Phaser.Input.Keyboard.Key;
   private prevEscHeld = false;
   private prevConfirmHeld = false;
   private prevCancelHeld = false;
   private prevMenuUpHeld = false;
   private prevMenuDownHeld = false;
+  private prevMenuLeftHeld = false;
+  private prevMenuRightHeld = false;
   private restartHoldMs = 0;
   private restartHoldText!: Phaser.GameObjects.Text;
 
@@ -181,6 +185,8 @@ export class TimeMainScene extends Phaser.Scene {
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.menuUpKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
     this.menuDownKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+    this.menuLeftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+    this.menuRightKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
     this.resyncMenuNavHeldState();
   }
 
@@ -439,6 +445,21 @@ export class TimeMainScene extends Phaser.Scene {
       this.menuOverlay.moveFocus(1);
     }
 
+    const stickX = pad?.leftStick.x ?? 0;
+    const leftHeld = this.menuLeftKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_LEFT) || stickX < -MENU_STICK_THRESHOLD;
+    const leftPressed = leftHeld && !this.prevMenuLeftHeld;
+    this.prevMenuLeftHeld = leftHeld;
+    if (leftPressed) {
+      this.menuOverlay.adjustFocused(-1);
+    }
+
+    const rightHeld = this.menuRightKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT) || stickX > MENU_STICK_THRESHOLD;
+    const rightPressed = rightHeld && !this.prevMenuRightHeld;
+    this.prevMenuRightHeld = rightHeld;
+    if (rightPressed) {
+      this.menuOverlay.adjustFocused(1);
+    }
+
     const confirmHeld = this.confirmKey.isDown || isPadButtonDown(pad, DualSenseMap.CROSS);
     const confirmPressed = confirmHeld && !this.prevConfirmHeld;
     this.prevConfirmHeld = confirmHeld;
@@ -457,6 +478,11 @@ export class TimeMainScene extends Phaser.Scene {
       this.menuUpKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_UP) || stickY < -MENU_STICK_THRESHOLD;
     this.prevMenuDownHeld =
       this.menuDownKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_DOWN) || stickY > MENU_STICK_THRESHOLD;
+    const stickX = pad?.leftStick.x ?? 0;
+    this.prevMenuLeftHeld =
+      this.menuLeftKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_LEFT) || stickX < -MENU_STICK_THRESHOLD;
+    this.prevMenuRightHeld =
+      this.menuRightKey.isDown || isPadButtonDown(pad, DualSenseMap.DPAD_RIGHT) || stickX > MENU_STICK_THRESHOLD;
   }
 
   private enterPause(): void {
@@ -472,27 +498,37 @@ export class TimeMainScene extends Phaser.Scene {
     this.menuHintText.setVisible(true);
   }
 
-  /** Swaps the (already-showing) menu overlay to the OPTIONS screen - onBack is called (and the overlay swapped back) on BACK/esc/circle. Reuses the single shared menuOverlay rather than a separate instance, matching how pause/game-over already share it. Always full-screen "center" layout regardless of which menu opened it (the Game Over corner menu is too small to fit this), so its own nav hint text is shown here too and hidden again once onBack takes over. */
-  private showOptions(onBack: () => void): void {
+  /** Swaps the (already-showing) menu overlay to the OPTIONS screen - onBack is called (and the overlay swapped back) on BACK/esc/circle. Reuses the single shared menuOverlay rather than a separate instance, matching how pause/game-over already share it. Always full-screen "center" layout regardless of which menu opened it (the Game Over corner menu is too small to fit this), so its own nav hint text is shown here too and hidden again once onBack takes over. preserveFocus is passed straight through to menuOverlay.show() - true when a toggle/onAdjust re-shows this same screen on itself, so the highlight doesn't jump back to the top mid-adjustment; false (the default) when actually entering OPTIONS fresh. */
+  private showOptions(onBack: () => void, preserveFocus = false): void {
     this.optionsBackTarget = onBack;
     this.resyncMenuNavHeldState();
-    this.menuOverlay.show("OPTIONS", "", [
-      {
-        label: `SLASH RANGE INDICATOR: ${getShowSlashRangeIndicator() ? "ON" : "OFF"}`,
-        onSelect: () => {
-          setShowSlashRangeIndicator(!getShowSlashRangeIndicator());
-          this.showOptions(onBack);
+    this.menuOverlay.show(
+      "OPTIONS",
+      "",
+      [
+        {
+          label: `SLASH RANGE INDICATOR: ${getShowSlashRangeIndicator() ? "ON" : "OFF"}`,
+          onSelect: () => {
+            setShowSlashRangeIndicator(!getShowSlashRangeIndicator());
+            this.showOptions(onBack, true);
+          },
         },
-      },
-      {
-        label: `DEATH REPLAY SPEED: ${getReplaySpeed()}x`,
-        onSelect: () => {
-          cycleReplaySpeed();
-          this.showOptions(onBack);
+        {
+          label: `DEATH REPLAY SPEED: ${getReplaySpeed()}x`,
+          onSelect: () => {
+            cycleReplaySpeed();
+            this.showOptions(onBack, true);
+          },
+          onAdjust: (direction) => {
+            cycleReplaySpeed(direction);
+            this.showOptions(onBack, true);
+          },
         },
-      },
-      { label: "BACK", onSelect: () => this.closeOptions() },
-    ]);
+        { label: "BACK", onSelect: () => this.closeOptions() },
+      ],
+      "center",
+      preserveFocus,
+    );
     this.menuHintText.setVisible(true);
   }
 
