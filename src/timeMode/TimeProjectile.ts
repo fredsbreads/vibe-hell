@@ -16,6 +16,17 @@ const ESCAPE_MARGIN = 80;
  * instead of guessing when the real projectile would actually die.
  */
 export const DEFLECT_MAX_WALL_BOUNCES = 2;
+/**
+ * Minimum real (undilated) ms that must pass between two wall bounces for
+ * the second one to actually consume DEFLECT_MAX_WALL_BOUNCES' budget - a
+ * bounce landing near a corner (or a shallow-angle carom off two nearby
+ * wall segments) can otherwise hit a second wall almost instantly, killing
+ * the projectile before the player had any real window to react and
+ * re-deflect it between the two. A bounce that lands too soon after the
+ * previous one still reflects normally (it's not ignored physically), it
+ * just doesn't count against the budget - see bounceOffWall().
+ */
+const MIN_MS_BETWEEN_WALL_BOUNCES = 150;
 /** Not yet re-deflectable (locked) is dark blue; becoming re-deflectable (see isReDeflectable) switches to teal (matches the player's own color) - "you can act on this now." Blue rather than the menu convention's yellow for the ready state would collide with the straight kind's hostile color (0xf2e85c) - a friendly re-deflectable shot getting mistaken for an incoming hostile one at a glance defeats the point. Originally distinguished by kind too, but that's deliberately dropped - only the re-deflectable state matters. */
 const DEFLECT_LOCKED_TINT = 0x4d9fff;
 const DEFLECT_REDEFLECTABLE_TINT = 0x59f2c8;
@@ -128,6 +139,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private vy = 0;
   private isDeflected = false;
   private wallBounceCount = 0;
+  /** Real ms elapsed since the last wall bounce (or since deflect()/bounceOffPoint(), whichever's more recent) - see MIN_MS_BETWEEN_WALL_BOUNCES. */
+  private msSinceLastWallBounce = 0;
   private deflectBurstRemainingMs = 0;
   /** Whether this projectile has bounced off an enemy since its last deflect - see the isReDeflectable doc comment. */
   private bouncedOffEnemySinceDeflect = false;
@@ -171,6 +184,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.vy = Math.sin(aimAngle) * this.speed;
     this.isDeflected = false;
     this.wallBounceCount = 0;
+    this.msSinceLastWallBounce = Infinity;
     this.deflectBurstRemainingMs = 0;
     this.bouncedOffEnemySinceDeflect = false;
     this.lastHitSwingId = -1;
@@ -251,6 +265,12 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   deflect(aimAngle: number, swingId: number): void {
     this.isDeflected = true;
     this.wallBounceCount = 0;
+    // Infinity, not 0: the FIRST wall bounce after a (re-)deflect should
+    // always count normally (matching the original "survive 1, die on the
+    // 2nd" rule) - the minimum-gap protection only matters for a bounce
+    // that follows ANOTHER bounce too quickly, not the first one after a
+    // fresh deflect.
+    this.msSinceLastWallBounce = Infinity;
     this.bouncedOffEnemySinceDeflect = false;
     this.lastHitSwingId = swingId;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
@@ -290,6 +310,10 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
 
     if (this.isDeflected) {
       this.wallBounceCount = 0;
+      // Same reasoning as deflect() - refreshing the budget should also
+      // refresh "the next wall bounce always counts", not start it off
+      // artificially protected.
+      this.msSinceLastWallBounce = Infinity;
       this.bouncedOffEnemySinceDeflect = true;
       this.chainHitCount++;
       this.setTintFill(this.currentTintColor);
@@ -321,6 +345,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
       const burstSpeedCap = this.baseSpeedForKind * Math.pow(DEFLECT_SPEED_MULTIPLIER, cappedDeflects);
       burstSpeedScale = this.speed > 0 ? Math.min(1, burstSpeedCap / this.speed) : 1;
     }
+
+    this.msSinceLastWallBounce += effectiveDelta;
 
     const dt = effectiveDelta / 1000;
 
@@ -408,7 +434,13 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     }
 
     if (this.isDeflected) {
-      this.wallBounceCount++;
+      // Only counts against the budget if there was real time since the last
+      // one - see MIN_MS_BETWEEN_WALL_BOUNCES. Reset either way: the NEXT
+      // bounce should be judged against THIS one's timing, not an earlier one.
+      if (this.msSinceLastWallBounce >= MIN_MS_BETWEEN_WALL_BOUNCES) {
+        this.wallBounceCount++;
+      }
+      this.msSinceLastWallBounce = 0;
     }
   }
 
