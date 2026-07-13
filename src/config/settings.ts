@@ -30,3 +30,22 @@ export function getShowSlashRangeIndicator(): boolean {
 export function setShowSlashRangeIndicator(value: boolean): void {
   localStorage.setItem(SHOW_SLASH_RANGE_STORAGE_KEY, value ? "true" : "false");
 }
+
+const REPLAY_SPEED_STORAGE_KEY = "vibehell.replaySpeed";
+/** Every pace the death replay's overall speed can be cycled through (see TimeMainScene.updateReplay) - 1 is true real-time pace, matching the run's own pace exactly; the rest are deliberate speedups on top of that. Cycled through via the OPTIONS menu. */
+export const REPLAY_SPEED_OPTIONS = [1, 1.25, 1.5, 2] as const;
+
+/** How much faster than true real-time the death replay plays back. Defaults to 1 (no speedup) - a fresh player sees the replay reproduce the run exactly as it happened, matching how it actually looked live. Persisted to localStorage so the choice survives page reloads. */
+export function getReplaySpeed(): number {
+  const stored = Number(localStorage.getItem(REPLAY_SPEED_STORAGE_KEY));
+  return (REPLAY_SPEED_OPTIONS as readonly number[]).includes(stored) ? stored : 1;
+}
+
+/** Advances getReplaySpeed() to the next value in REPLAY_SPEED_OPTIONS, wrapping back to the first after the last - mirrors the SLASH RANGE INDICATOR toggle's "select cycles it, re-shows the menu" pattern. Returns the new value so the caller can redraw its label immediately. */
+export function cycleReplaySpeed(): number {
+  const options = REPLAY_SPEED_OPTIONS;
+  const index = options.indexOf(getReplaySpeed() as (typeof options)[number]);
+  const next = options[(index + 1) % options.length];
+  localStorage.setItem(REPLAY_SPEED_STORAGE_KEY, String(next));
+  return next;
+}

@@ -32,6 +32,20 @@ const DEFLECT_SPEED_MULTIPLIER = 1.6;
 const DEFLECT_BURST_MS = 300;
 
 /**
+ * How many total deflects (the initial deflect plus every re-deflect) the
+ * post-deflect burst's speed keeps scaling up with, before it stops - a
+ * redeflected-many-times projectile keeps getting objectively faster for
+ * its STEADY (world-scaled, post-burst) travel forever, but the brief
+ * full-speed burst distance right after each deflect would otherwise keep
+ * stretching out further and further too (same fixed DEFLECT_BURST_MS,
+ * ever-higher compounding speed = ever-more distance covered in that
+ * window). Past this many deflects, the burst's effective speed is capped
+ * at whatever it was on the DEFLECT_BURST_SPEED_CAP_DEFLECTS-th deflect -
+ * see step()'s burstSpeedScale.
+ */
+const DEFLECT_BURST_SPEED_CAP_DEFLECTS = 3;
+
+/**
  * Length (px) of the directional tail drawn behind the projectile, pointing
  * back the way it came. Drawn as several progressively shorter/fainter
  * segments to fake a taper, since Graphics strokes don't support a real
@@ -104,6 +118,8 @@ export const KIND_CONFIG: Record<ProjectileKind, { speed: number; color: number 
 export class TimeProjectile extends Phaser.GameObjects.Image {
   readonly radius: number;
   private speed = BASE_SPEED;
+  /** speed's value at activate(), before any deflect's compounding - the reference point burstSpeedScale caps against (see step()). Never mutated after activate(). */
+  private baseSpeedForKind = BASE_SPEED;
   private baseColor = KIND_CONFIG.straight.color;
   private kind: ProjectileKind = "straight";
   private readonly tailGraphic: Phaser.GameObjects.Graphics;
@@ -126,6 +142,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
    * TimePlayer.setMaxDashCharges.
    */
   private chainHitCount = 0;
+  /** How many times deflect() has been called on this projectile (initial deflect + every re-deflect) - drives the burst speed cap, see DEFLECT_BURST_SPEED_CAP_DEFLECTS. Reset only in activate(). */
+  private deflectCount = 0;
 
   /** Recent velocity headings (radians), oldest first, sampled every tailSegmentLength of travel - see the TAIL_BASE_LENGTH doc comment above. */
   private readonly headingHistory: number[] = [];
@@ -146,6 +164,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     const config = KIND_CONFIG[kind];
     this.kind = kind;
     this.speed = config.speed;
+    this.baseSpeedForKind = config.speed;
     this.baseColor = config.color;
     this.setPosition(x, y);
     this.vx = Math.cos(aimAngle) * this.speed;
@@ -156,6 +175,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.bouncedOffEnemySinceDeflect = false;
     this.lastHitSwingId = -1;
     this.chainHitCount = 0;
+    this.deflectCount = 0;
     this.headingHistory.length = 0;
     this.headingHistory.push(aimAngle);
     this.distanceSinceLastSample = 0;
@@ -234,6 +254,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.bouncedOffEnemySinceDeflect = false;
     this.lastHitSwingId = swingId;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
+    this.deflectCount++;
     this.speed *= DEFLECT_SPEED_MULTIPLIER;
     this.vx = Math.cos(aimAngle) * this.speed;
     this.vy = Math.sin(aimAngle) * this.speed;
@@ -286,9 +307,19 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
    */
   step(realDelta: number, worldScaledDelta: number, arena: Arena, playerX: number, playerY: number): boolean {
     let effectiveDelta = worldScaledDelta;
+    // Caps the burst's effective speed (and so the distance it covers over
+    // its fixed DEFLECT_BURST_MS window) at whatever it was on the
+    // DEFLECT_BURST_SPEED_CAP_DEFLECTS-th deflect - a projectile redeflected
+    // beyond that keeps getting objectively faster for its steady travel
+    // (this.speed itself is never capped), only the burst's own distance
+    // stops growing further. 1 (no scaling) whenever not currently bursting.
+    let burstSpeedScale = 1;
     if (this.deflectBurstRemainingMs > 0) {
       effectiveDelta = realDelta;
       this.deflectBurstRemainingMs = Math.max(0, this.deflectBurstRemainingMs - realDelta);
+      const cappedDeflects = Math.min(this.deflectCount, DEFLECT_BURST_SPEED_CAP_DEFLECTS);
+      const burstSpeedCap = this.baseSpeedForKind * Math.pow(DEFLECT_SPEED_MULTIPLIER, cappedDeflects);
+      burstSpeedScale = this.speed > 0 ? Math.min(1, burstSpeedCap / this.speed) : 1;
     }
 
     const dt = effectiveDelta / 1000;
@@ -297,9 +328,9 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
       this.turnTowardPlayer(playerX, playerY, dt);
     }
 
-    const moveDist = Math.hypot(this.vx, this.vy) * dt;
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
+    const moveDist = Math.hypot(this.vx, this.vy) * burstSpeedScale * dt;
+    this.x += this.vx * burstSpeedScale * dt;
+    this.y += this.vy * burstSpeedScale * dt;
 
     this.bounceOffWall(arena, playerX, playerY);
     this.sampleHeading(moveDist);

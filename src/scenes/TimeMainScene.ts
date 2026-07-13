@@ -6,7 +6,7 @@ import { Arena } from "../arena/Arena";
 import { PolygonArena } from "../arena/PolygonArena";
 import { DualSenseMap, isPadButtonDown } from "../input/DualSenseMap";
 import { MenuOverlay } from "../ui/MenuOverlay";
-import { getShowSlashRangeIndicator, setShowSlashRangeIndicator } from "../config/settings";
+import { getShowSlashRangeIndicator, setShowSlashRangeIndicator, getReplaySpeed, cycleReplaySpeed } from "../config/settings";
 import { RecordedFrame, RecordedInputSource } from "../timeMode/ReplayRecorder";
 import { randomSeed } from "../timeMode/SeededRandom";
 import { computeWorldTimescale } from "../timeMode/worldClock";
@@ -35,17 +35,6 @@ const DEATH_FLASH_DURATION_MS = 200;
  * to catch up instead.
  */
 const REPLAY_MAX_STEPS_PER_FRAME = 400;
-/**
- * How much faster than true real-time the replay's overall pace runs -
- * every real frame deposits this many times its own realDelta into the
- * pacing budget (see updateReplay), so a stretch that was already at 100%
- * world speed live now plays back at 1.5x that (deliberately faster than
- * anything achievable in a live run - unlike the world-timescale CAP this
- * sits on top of, which is about never exceeding true max speed, this is a
- * separate, explicit "and now go a bit faster than that" multiplier on the
- * whole replay).
- */
-const REPLAY_SPEED_MULTIPLIER = 1.5;
 /**
  * Ceiling on how much surplus replayWorldTimeBudgetMs is allowed to bank up
  * (see updateReplay's doc comment for the accumulator itself). Without this,
@@ -282,12 +271,14 @@ export class TimeMainScene extends Phaser.Scene {
    *
    * Paces itself against a persistent WORLD-scaled time budget
    * (replayWorldTimeBudgetMs): every real frame deposits `realDelta *
-   * REPLAY_SPEED_MULTIPLIER` into it, and each recorded step withdraws its
-   * own worldScaledDelta, so the world-time-per-real-time ratio averages out
-   * to exactly REPLAY_SPEED_MULTIPLIER over time - a stretch that was
-   * already at 100% world speed live (the live game's own ceiling - world
-   * timescale never exceeds 100%, see computeWorldTimescale) now plays back
-   * at REPLAY_SPEED_MULTIPLIER times that, deliberately faster than
+   * getReplaySpeed()` into it (a user-configurable OPTIONS setting - see
+   * config/settings.ts, defaults to 1, i.e. true real-time pace, matching
+   * the run's own pace exactly), and each recorded step withdraws its own
+   * worldScaledDelta, so the world-time-per-real-time ratio averages out to
+   * exactly the configured speed over time - a stretch that was already at
+   * 100% world speed live (the live game's own ceiling - world timescale
+   * never exceeds 100%, see computeWorldTimescale) now plays back at that
+   * many times that pace, which past 1x is deliberately faster than
    * anything achievable in a live run. It's an accumulator that carries its
    * remainder (positive OR negative) across frames, rather than a fresh
    * per-frame target, AND each step is only taken if doing so leaves the
@@ -296,10 +287,10 @@ export class TimeMainScene extends Phaser.Scene {
    * overshoots by a whole extra step just because a small leftover residual
    * technically still counted as "budget remaining." A stretch that was
    * already near full speed live needs about one step per frame to keep the
-   * budget roughly even, so it plays back at REPLAY_SPEED_MULTIPLIER times
-   * real-time speed; a stretch that was near-frozen live needs many steps
-   * to spend down a budget that's been building up, so it gets compressed
-   * up to (never past) that same pace instead of showing slow motion.
+   * budget roughly even, so it plays back at the configured pace; a stretch
+   * that was near-frozen live needs many steps to spend down a budget
+   * that's been building up, so it gets compressed up to (never past) that
+   * same pace instead of showing slow motion.
    * Purely a pacing choice layered on top of a state-faithful replay - every
    * individual step still derives its own worldTimescale from that step's
    * real recorded moveX/moveY, so the simulation itself (enemy timers,
@@ -315,7 +306,7 @@ export class TimeMainScene extends Phaser.Scene {
       return;
     }
 
-    this.replayWorldTimeBudgetMs = Math.min(this.replayWorldTimeBudgetMs + realDelta * REPLAY_SPEED_MULTIPLIER, REPLAY_MAX_BUDGET_MS);
+    this.replayWorldTimeBudgetMs = Math.min(this.replayWorldTimeBudgetMs + realDelta * getReplaySpeed(), REPLAY_MAX_BUDGET_MS);
 
     let steps = 0;
     while (steps < REPLAY_MAX_STEPS_PER_FRAME) {
@@ -490,6 +481,13 @@ export class TimeMainScene extends Phaser.Scene {
         label: `SLASH RANGE INDICATOR: ${getShowSlashRangeIndicator() ? "ON" : "OFF"}`,
         onSelect: () => {
           setShowSlashRangeIndicator(!getShowSlashRangeIndicator());
+          this.showOptions(onBack);
+        },
+      },
+      {
+        label: `DEATH REPLAY SPEED: ${getReplaySpeed()}x`,
+        onSelect: () => {
+          cycleReplaySpeed();
           this.showOptions(onBack);
         },
       },
