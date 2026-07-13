@@ -317,6 +317,24 @@ export class TimeManager {
     const pulse = (Math.sin((this.previewPulseMs / SLASH_PREVIEW_PULSE_PERIOD_MS) * Math.PI * 2) + 1) / 2;
     const alpha = Phaser.Math.Linear(SLASH_PREVIEW_MIN_ALPHA, SLASH_PREVIEW_MAX_ALPHA, pulse);
 
+    // Enemies this very swing would kill outright. A deflected projectile's
+    // traced trajectory can never actually bounce off one of these - in real
+    // resolution (checkSlashHits) the deflect and the direct-kill both
+    // happen synchronously within the same swing, before the projectile
+    // ever moves again, so by the time it would reach that enemy's position
+    // the enemy is already gone. Computed once up front and threaded through
+    // buildPreviewPath/findEnemyBlockingPoint so the traced path can't
+    // "bounce" off a target that won't be there.
+    const enemiesKilledBySwing = new Set<Enemy>();
+    for (const enemy of this.enemyPool) {
+      if (!enemy.isAlive) {
+        continue;
+      }
+      if (this.isWithinSlashArc(enemy.x, enemy.y, Enemy.RADIUS, previewHitbox)) {
+        enemiesKilledBySwing.add(enemy);
+      }
+    }
+
     for (const projectile of this.projectilePool) {
       if (!projectile.active) {
         continue;
@@ -327,16 +345,10 @@ export class TimeManager {
       if (!this.isWithinSlashArc(projectile.x, projectile.y, projectile.radius, previewHitbox)) {
         continue;
       }
-      this.drawPreviewHighlight(projectile, previewHitbox.angle, alpha);
+      this.drawPreviewHighlight(projectile, previewHitbox.angle, alpha, enemiesKilledBySwing);
     }
 
-    for (const enemy of this.enemyPool) {
-      if (!enemy.isAlive) {
-        continue;
-      }
-      if (!this.isWithinSlashArc(enemy.x, enemy.y, Enemy.RADIUS, previewHitbox)) {
-        continue;
-      }
+    for (const enemy of enemiesKilledBySwing) {
       this.drawPreviewRing(enemy.x, enemy.y, Enemy.RADIUS, alpha);
     }
   }
@@ -346,7 +358,12 @@ export class TimeManager {
     this.previewGraphic.strokeCircle(x, y, radius + SLASH_PREVIEW_RING_PADDING);
   }
 
-  private drawPreviewHighlight(projectile: TimeProjectile, trajectoryAngle: number, alpha: number): void {
+  private drawPreviewHighlight(
+    projectile: TimeProjectile,
+    trajectoryAngle: number,
+    alpha: number,
+    excludeEnemies: Set<Enemy>,
+  ): void {
     this.drawPreviewRing(projectile.x, projectile.y, projectile.radius, alpha);
 
     // Scale the line length by how much faster/slower this particular
@@ -359,7 +376,7 @@ export class TimeManager {
       SLASH_PREVIEW_MAX_LINE_LENGTH,
     );
 
-    const { path, hitEnemies } = this.buildPreviewPath(projectile.x, projectile.y, trajectoryAngle, projectile.radius, lineLength);
+    const { path, hitEnemies } = this.buildPreviewPath(projectile.x, projectile.y, trajectoryAngle, projectile.radius, lineLength, excludeEnemies);
     this.drawDashedPath(path);
     // Any enemy further down the chain also gets the same ring the primary
     // target does - "this too is on the path and would get hit", not just
@@ -407,6 +424,7 @@ export class TimeManager {
     angle: number,
     radius: number,
     lineLength: number,
+    excludeEnemies: Set<Enemy>,
   ): { path: { x: number; y: number }[]; hitEnemies: Enemy[] } {
     const points: { x: number; y: number }[] = [{ x: startX, y: startY }];
     const hitEnemies: Enemy[] = [];
@@ -423,7 +441,7 @@ export class TimeManager {
       const nextX = x + dirX * step;
       const nextY = y + dirY * step;
 
-      const blockingEnemy = this.findEnemyBlockingPoint(nextX, nextY, radius);
+      const blockingEnemy = this.findEnemyBlockingPoint(nextX, nextY, radius, excludeEnemies);
       if (blockingEnemy) {
         const dx = nextX - blockingEnemy.x;
         const dy = nextY - blockingEnemy.y;
@@ -487,11 +505,11 @@ export class TimeManager {
     return { path: points, hitEnemies };
   }
 
-  /** The first alive enemy whose round body would block a point on the preview's march, or null if none does. */
-  private findEnemyBlockingPoint(x: number, y: number, radius: number): Enemy | null {
+  /** The first alive enemy (excluding any this same swing would kill outright - see excludeEnemies' call-site doc comment) whose round body would block a point on the preview's march, or null if none does. */
+  private findEnemyBlockingPoint(x: number, y: number, radius: number, excludeEnemies: Set<Enemy>): Enemy | null {
     const minDist = Enemy.RADIUS + radius;
     for (const enemy of this.enemyPool) {
-      if (!enemy.isAlive) {
+      if (!enemy.isAlive || excludeEnemies.has(enemy)) {
         continue;
       }
       const dx = x - enemy.x;
