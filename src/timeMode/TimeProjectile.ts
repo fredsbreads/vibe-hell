@@ -17,14 +17,19 @@ const ESCAPE_MARGIN = 80;
  */
 export const DEFLECT_MAX_WALL_BOUNCES = 2;
 /**
- * Minimum real (undilated) ms that must pass between two wall bounces for
- * the second one to actually consume DEFLECT_MAX_WALL_BOUNCES' budget - a
- * bounce landing near a corner (or a shallow-angle carom off two nearby
- * wall segments) can otherwise hit a second wall almost instantly, killing
- * the projectile before the player had any real window to react and
+ * Minimum world-scaled ("game time") ms that must pass between two wall
+ * bounces for the second one to actually consume DEFLECT_MAX_WALL_BOUNCES'
+ * budget - a bounce landing near a corner (or a shallow-angle carom off two
+ * nearby wall segments) can otherwise hit a second wall almost instantly,
+ * killing the projectile before the player had any real window to react and
  * re-deflect it between the two. A bounce that lands too soon after the
  * previous one still reflects normally (it's not ignored physically), it
- * just doesn't count against the budget - see bounceOffWall().
+ * just doesn't count against the budget - see bounceOffWall(). Deliberately
+ * world-scaled, not real time: every other "waiting" mechanic in this mode
+ * (Dash's lockout, Slash's cooldown) already runs on world-scaled time, so
+ * standing still doesn't let this grace period run out for free either -
+ * consistent with the game's own rule that the world (and so a bounce
+ * "expiring") only advances while you're moving.
  */
 const MIN_MS_BETWEEN_WALL_BOUNCES = 150;
 /** Not yet re-deflectable (locked) is dark blue; becoming re-deflectable (see isReDeflectable) switches to teal (matches the player's own color) - "you can act on this now." Blue rather than the menu convention's yellow for the ready state would collide with the straight kind's hostile color (0xf2e85c) - a friendly re-deflectable shot getting mistaken for an incoming hostile one at a glance defeats the point. Originally distinguished by kind too, but that's deliberately dropped - only the re-deflectable state matters. */
@@ -139,7 +144,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private vy = 0;
   private isDeflected = false;
   private wallBounceCount = 0;
-  /** Real ms elapsed since the last wall bounce (or since deflect()/bounceOffPoint(), whichever's more recent) - see MIN_MS_BETWEEN_WALL_BOUNCES. */
+  /** World-scaled ms elapsed since the last wall bounce (or since deflect()/bounceOffPoint(), whichever's more recent) - see MIN_MS_BETWEEN_WALL_BOUNCES. */
   private msSinceLastWallBounce = 0;
   private deflectBurstRemainingMs = 0;
   /** Whether this projectile has bounced off an enemy since its last deflect - see the isReDeflectable doc comment. */
@@ -346,14 +351,12 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
       burstSpeedScale = this.speed > 0 ? Math.min(1, burstSpeedCap / this.speed) : 1;
     }
 
-    // realDelta, deliberately NOT effectiveDelta: whether a bounce landed
-    // "too soon" to fairly react to is a real wall-clock-time question,
-    // independent of the current world timescale. Using effectiveDelta
-    // (world-scaled once the burst window ends) would be actively wrong
-    // once the world's nearly frozen - a bounce pair separated by a tiny
-    // amount of WORLD time could still span a long stretch of real time
-    // (plenty of reaction time) while still reading as "instant" here.
-    this.msSinceLastWallBounce += realDelta;
+    // worldScaledDelta, not realDelta or effectiveDelta: matches every other
+    // "waiting" mechanic in this mode (Dash's lockout, Slash's cooldown),
+    // which all run on world-scaled time - standing still doesn't let this
+    // grace period run out for free either, consistent with the game's own
+    // rule that the world only advances while you're moving.
+    this.msSinceLastWallBounce += worldScaledDelta;
 
     const dt = effectiveDelta / 1000;
 
