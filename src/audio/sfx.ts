@@ -4,7 +4,7 @@
  * one-shot whose own real-world duration is fixed regardless of the current
  * world timescale - that's only valid because every trigger point is itself
  * an instantaneous event (a hit landing, a swing starting) or something that
- * already runs on real, undilated time (Dash/Slash's own active duration -
+ * already runs on real, undilated time (Slash's own active duration -
  * see TimePlayer's class doc comment). A sound tied to something that spans
  * world-scaled time (the enemy fire telegraph, an ambient "world is nearly
  * frozen" drone) would need to be driven live, frame by frame, instead of
@@ -53,8 +53,8 @@ function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
   return curve;
 }
 
-/** A quick, soft-attack slide - narrow bandpass noise gliding downward, plus a hair of high-frequency bite at the very onset for definition. Deliberately not punchy: no low-frequency thump, low peak gain. */
-export function playDash(): void {
+/** A quick, soft-attack slide - narrow bandpass noise gliding downward, plus a hair of high-frequency bite at the very onset for definition. Deliberately not punchy: no low-frequency thump, low peak gain. Triggered once on the rising edge of Slide starting (see TimePlayer.update()), not every frame it stays held. */
+export function playSlide(): void {
   const c = getCtx();
   const m = getMaster();
   const t0 = c.currentTime;
@@ -204,7 +204,7 @@ export function playChainHit(chainCount: number): void {
   }
 }
 
-/** A bright three-note chime - a chain hit just raised the live dash-charge cap (see TimePlayer.setMaxDashCharges), handing over a fresh bonus dash. */
+/** A bright three-note chime - a chain hit just raised the live slide-distance cap (see TimePlayer.setMaxSlideDistance), handing over fresh bonus slide distance. */
 export function playChargeBanked(): void {
   const c = getCtx();
   const m = getMaster();
@@ -223,7 +223,7 @@ export function playChargeBanked(): void {
   });
 }
 
-/** A quiet, single-note tick - one spent dash charge finished its passive regen timer (see TimePlayer.tickCooldowns). Deliberately smaller than playChargeBanked - this is a background/idle event, not a combat reward. */
+/** A quiet, single-note tick - the slide-distance budget just fully regenerated back to its cap (see TimePlayer.tickCooldowns). Deliberately smaller than playChargeBanked - this is a background/idle event, not a combat reward. */
 export function playChargeRegen(): void {
   const c = getCtx();
   const m = getMaster();

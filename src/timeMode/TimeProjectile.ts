@@ -156,8 +156,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
    * first deflected - persists across re-deflects (a re-aim doesn't reset the
    * chain, it's still the same flight), reset only in activate(), i.e. when
    * this pooled instance becomes a brand new hostile shot. Drives the
-   * player's bonus dash charges - see TimeManager.liveMaxChainCount and
-   * TimePlayer.setMaxDashCharges.
+   * player's bonus slide distance - see TimeManager.liveMaxChainCount and
+   * TimePlayer.setMaxSlideDistance.
    */
   private chainHitCount = 0;
   /** How many times deflect() has been called on this projectile (initial deflect + every re-deflect) - drives the burst speed cap, see DEFLECT_BURST_SPEED_CAP_DEFLECTS. Reset only in activate(). */

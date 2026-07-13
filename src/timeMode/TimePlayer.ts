@@ -3,19 +3,31 @@ import { PlayerInput, InputSource, InputState } from "../input/PlayerInput";
 import { Arena } from "../arena/Arena";
 import { computeWorldTimescale } from "./worldClock";
 import { getShowSlashRangeIndicator } from "../config/settings";
-import { playDash, playSlash, playDeath, playChargeBanked, playChargeRegen } from "../audio/sfx";
+import { playSlide, playSlash, playDeath, playChargeBanked, playChargeRegen } from "../audio/sfx";
 
-const DASH_TINT = 0xaefff0;
+const SLIDE_TINT = 0xaefff0;
 const HURT_TINT = 0xff3b3b;
 
 const MOVE_SPEED = 320;
 const WALL_EPSILON = 0.5;
 
-const DASH_SPEED = 900;
-const DASH_DURATION_MS = 150;
-const DASH_COOLDOWN_MS = 200;
-const DASH_LOCKOUT_MS = DASH_DURATION_MS + DASH_COOLDOWN_MS;
-const DASH_IFRAME_TAIL_MS = 150;
+/** Slide's own move speed - deliberately just a bit above normal movement (not the old instant-burst Dash's speed), since it's now a holdable state rather than a one-shot burst. */
+const SLIDE_SPEED = 460;
+/**
+ * The baseline distance budget Slide can spend before it stops working (see
+ * update()'s isSliding check) - always at least this much, same "there's
+ * always a floor" spirit the old dash-charges system had. Scales up with a
+ * live deflect chain (see TimeManager.liveMaxChainCount): TimeMainScene
+ * calls setMaxSlideDistance(BASE_SLIDE_DISTANCE * Math.max(1,
+ * liveMaxChainCount)) every frame, so a chain of 4 quadruples the budget,
+ * same multiplier the old "4 deflects -> 4 dashes" model used, just
+ * expressed as distance instead of discrete charges. Exported so
+ * TimeMainScene can compute that same product without duplicating the
+ * number.
+ */
+export const BASE_SLIDE_DISTANCE = 140;
+/** How fast the distance budget refills (px of budget per real second) while NOT actively sliding - world-scaled, like every other "waiting" mechanic in this mode (Slash's cooldown, and the wall-bounce grace period), so standing still doesn't let it regenerate for free. */
+const SLIDE_REGEN_PX_PER_SEC = 70;
 
 const SLASH_DURATION_MS = 120;
 const SLASH_COOLDOWN_MS = 500;
@@ -53,14 +65,14 @@ export interface SlashHitbox {
  * A fork of the original game's Player, adapted for the time-dilation mode's
  * two different clocks (see WaveClock doc comment in worldClock.ts):
  *
- * - The player's own movement, aim, and the ACTIVE duration of Dash/Slash
- *   (the moment of acting itself) all run on the real, undilated delta -
- *   always fully responsive, equally skill-testing to time regardless of the
+ * - The player's own movement, aim, and the ACTIVE duration of Slash (the
+ *   moment of acting itself) all run on the real, undilated delta - always
+ *   fully responsive, equally skill-testing to time regardless of the
  *   current world timescale.
- * - Dash's lockout and Slash's cooldown (the "waiting to do it again" part)
- *   run on the world-scaled delta instead - standing still to wait out a
- *   cooldown for free doesn't work, because standing still is exactly what
- *   keeps world-time from advancing.
+ * - Slide's distance-budget regen and Slash's cooldown (the "waiting to do
+ *   it again" part) run on the world-scaled delta instead - standing still
+ *   to wait either out for free doesn't work, because standing still is
+ *   exactly what keeps world-time from advancing.
  *
  * 1 HP, no hit-grace window - unlike the original 3-HP game, there's no
  * "cluster of hits in one instant" to guard against, since the very first
@@ -78,8 +90,8 @@ export class TimePlayer {
   private readonly aimIndicator: Phaser.GameObjects.Graphics;
   private readonly slashGraphic: Phaser.GameObjects.Graphics;
   private readonly slashRangeGraphic: Phaser.GameObjects.Graphics;
-  private readonly dashChargeAura: Phaser.GameObjects.Graphics;
-  /** Drives the dash-charge aura's pulse (see redrawDashChargeAura) - real-time, like the slash preview's own pulse, since it's a cosmetic readout rather than part of "the world". */
+  private readonly slideDistanceAura: Phaser.GameObjects.Graphics;
+  /** Drives the slide-distance aura's pulse (see redrawSlideDistanceAura) - real-time, like the slash preview's own pulse, since it's a cosmetic readout rather than part of "the world". */
   private auraPulseMs = 0;
 
   /**
@@ -99,26 +111,28 @@ export class TimePlayer {
   private velocityX = 0;
   private velocityY = 0;
 
-  private isDashing = false;
-  private dashTimeRemainingMs = 0;
-  private dashLockoutRemainingMs = 0;
-  private dashIframeTailRemainingMs = 0;
   /**
-   * How many dashes are currently banked and spendable right now - normally
-   * 1 (see maxDashChargesValue), but can rise above that off the back of a
-   * deflected-projectile kill chain (see setMaxDashCharges). Spending charges
-   * (see startDash) is always free - no individual cooldown as long as any
-   * remain. Once below maxDashChargesValue, though, dashLockoutRemainingMs
-   * ticks down to regenerate exactly one charge at a time (see
-   * tickCooldowns), same DASH_LOCKOUT_MS pace as the original single-dash
-   * cooldown, restarting for the next charge each time one comes back, until
-   * charges is back at the cap. So: no cooldown to USE a banked charge, but
-   * still a cooldown to REGAIN each spent one, up to whatever the current
-   * cap is.
+   * True while Slide's button is held, the stick is actually tilted (no
+   * point "sliding" in place - see update()), and there's budget left. Time
+   * stays frozen and the player is invincible for as long as this is true;
+   * it goes false the instant any of those three stop being true, including
+   * the budget hitting 0 mid-hold - nothing special happens then, movement
+   * just quietly reverts to normal walking for the rest of the hold (see
+   * update()'s speed selection).
    */
-  private dashCharges = 1;
-  /** The current ceiling on dashCharges - always max(1, TimeManager.liveMaxChainCount), kept in sync every frame by the caller via setMaxDashCharges. */
-  private maxDashChargesValue = 1;
+  private isSliding = false;
+  /**
+   * How much further Slide can move the player before it stops working -
+   * always at least BASE_SLIDE_DISTANCE (see maxSlideDistanceValue), but can
+   * rise above that off the back of a deflected-projectile kill chain (see
+   * setMaxSlideDistance). Depletes by the exact distance moved while
+   * isSliding is true; regenerates continuously (a stamina meter, not
+   * discrete charges) while NOT sliding, up to whatever the current cap is -
+   * see tickCooldowns.
+   */
+  private slideDistance = BASE_SLIDE_DISTANCE;
+  /** The current ceiling on slideDistance - always max(1, TimeManager.liveMaxChainCount) * BASE_SLIDE_DISTANCE, kept in sync every frame by the caller via setMaxSlideDistance. */
+  private maxSlideDistanceValue = BASE_SLIDE_DISTANCE;
 
   private slashAngle = 0;
   private slashActiveRemainingMs = 0;
@@ -146,8 +160,8 @@ export class TimePlayer {
     this.aimIndicator = scene.add.graphics();
     this.slashGraphic = scene.add.graphics();
     this.slashRangeGraphic = scene.add.graphics();
-    this.dashChargeAura = scene.add.graphics();
-    this.dashChargeAura.setDepth(4);
+    this.slideDistanceAura = scene.add.graphics();
+    this.slideDistanceAura.setDepth(4);
   }
 
   /** The world timescale computed from this frame's raw stick input - read this AFTER calling update(), and use it to step everything else ("the world") this same frame. */
@@ -179,7 +193,7 @@ export class TimePlayer {
    * Re-syncs input edge-detection to whatever's currently held - call this
    * right after leaving a paused state (or right after constructing a fresh
    * TimePlayer on restart), so a button still held from confirming a menu
-   * (Cross/Enter doubles as both "confirm" and Dash) doesn't fire that
+   * (Cross/Enter doubles as both "confirm" and Slide) doesn't fire that
    * in-game action the instant control returns to gameplay. No-op (and
    * harmless) when the current input source doesn't support it, e.g. a
    * RecordedInputSource during replay.
@@ -192,6 +206,14 @@ export class TimePlayer {
     const state = this.input.read(this.position.x, this.position.y);
     this.lastInputStateValue = state;
     this.aimAngle = state.aimAngle;
+
+    const move = new Phaser.Math.Vector2(state.moveX, state.moveY);
+    // Speed scales with how far the stick is tilted (post-deadzone), not just
+    // whether it's tilted at all - a light push should move you slower, full
+    // tilt still hits top speed. Keyboard input is always -1/0/1 so this has
+    // no effect there; it only matters for analog stick input.
+    const tilt = Math.min(1, move.length());
+
     // Deliberately always DERIVED from this frame's moveX/moveY, live or
     // replayed alike - during a death replay this reproduces the exact same
     // worldScaledDelta sequence the original run had (a pure function of
@@ -201,47 +223,48 @@ export class TimePlayer {
     // seed. See TimeMainScene's updateReplay for how the replay still plays
     // back faster than the original run without touching this.
     //
-    // While dashing, though, the stick is treated as neutral regardless of
-    // what it's actually doing - a dash already moves the player at a fixed
-    // speed of its own (see startDash), ignoring the held direction, so
-    // letting a held stick ALSO keep the world moving during the dash would
-    // let players get dash's full i-frames/burst AND world-time progress at
-    // the same time just by holding a direction through it. Standing still
-    // (or dashing) should read as "the world waits for you" consistently,
-    // not conditionally on whether a direction happens to still be held.
-    const willDashThisFrame = this.isDashing || (state.dashPressed && this.canDash());
-    this.worldTimescaleValue = willDashThisFrame ? computeWorldTimescale(0, 0) : computeWorldTimescale(state.moveX, state.moveY);
+    // While sliding, though, the stick is treated as neutral regardless of
+    // what it's actually doing - Slide's whole point is "move without
+    // advancing the world", so letting a held stick ALSO advance world-time
+    // while sliding would defeat that. Requires actual stick tilt (not just
+    // the button held) - holding Slide in place with a neutral stick isn't
+    // "sliding" (see isSliding below), so it doesn't get this treatment or
+    // spend any budget; it just reads as standing still, same as ever.
+    const wasSliding = this.isSliding;
+    this.isSliding = state.dashHeld && tilt > 0 && this.slideDistance > 0;
+    this.worldTimescaleValue = this.isSliding ? computeWorldTimescale(0, 0) : computeWorldTimescale(state.moveX, state.moveY);
     const worldScaledDelta = realDelta * this.worldTimescaleValue;
 
-    this.tickCooldowns(realDelta, worldScaledDelta);
+    this.tickCooldowns(worldScaledDelta);
 
-    if (state.dashPressed && this.canDash()) {
-      this.startDash(state.moveX, state.moveY);
-    }
     if (state.slashPressed && this.canSlash()) {
       this.startSlash(state.aimAngle);
     }
-
-    this.updateDash(realDelta);
     this.updateSlash(realDelta);
 
-    if (!this.isDashing) {
-      const move = new Phaser.Math.Vector2(state.moveX, state.moveY);
-      // Speed scales with how far the stick is tilted (post-deadzone), not just
-      // whether it's tilted at all - a light push should move you slower, full
-      // tilt still hits MOVE_SPEED. Keyboard input is always -1/0/1 so this has
-      // no effect there; it only matters for analog stick input.
-      const tilt = Math.min(1, move.length());
-      if (tilt > 0) {
-        move.normalize().scale(MOVE_SPEED * tilt);
-      }
-      this.clipOutwardComponent(move);
-      this.velocityX = move.x;
-      this.velocityY = move.y;
+    if (this.isSliding && !wasSliding) {
+      playSlide();
     }
-    // While dashing, velocityX/Y deliberately stay whatever startDash() set -
-    // applied here every call just like the non-dashing case above, instead
-    // of relying on Arcade to keep re-applying a velocity we set once.
+
+    const speed = this.isSliding ? SLIDE_SPEED : MOVE_SPEED;
+    if (tilt > 0) {
+      move.normalize().scale(speed * tilt);
+    } else {
+      move.set(0, 0);
+    }
+    this.clipOutwardComponent(move);
+    this.velocityX = move.x;
+    this.velocityY = move.y;
+
+    if (this.isSliding) {
+      const moveDist = (Math.hypot(this.velocityX, this.velocityY) * realDelta) / 1000;
+      this.slideDistance = Math.max(0, this.slideDistance - moveDist);
+      this.sprite.setTint(SLIDE_TINT);
+      this.spawnSlideGhost();
+    } else {
+      this.sprite.clearTint();
+    }
+
     this.sprite.x += (this.velocityX * realDelta) / 1000;
     this.sprite.y += (this.velocityY * realDelta) / 1000;
 
@@ -250,7 +273,7 @@ export class TimePlayer {
     this.clampToArena();
     this.redrawAimIndicator();
     this.redrawSlashRangeIndicator();
-    this.redrawDashChargeAura();
+    this.redrawSlideDistanceAura();
   }
 
   private get position(): { x: number; y: number } {
@@ -264,7 +287,7 @@ export class TimePlayer {
   /**
    * Restarts this same TimePlayer instance in place at (x, y) - used to
    * loop the death replay without recreating the sprite/graphics objects
-   * each pass. Clears every piece of run-scoped state (dash/slash
+   * each pass. Clears every piece of run-scoped state (slide/slash
    * cooldowns, dead flag, tint, velocity, aim) back to a fresh run's
    * starting values; does NOT touch the input source - the caller sets
    * that once when entering replay and it stays a RecordedInputSource
@@ -276,14 +299,11 @@ export class TimePlayer {
     this.velocityY = 0;
     this.sprite.clearTint();
 
-    this.isDashing = false;
-    this.dashTimeRemainingMs = 0;
-    this.dashLockoutRemainingMs = 0;
-    this.dashIframeTailRemainingMs = 0;
-    this.dashCharges = 1;
-    this.maxDashChargesValue = 1;
+    this.isSliding = false;
+    this.slideDistance = BASE_SLIDE_DISTANCE;
+    this.maxSlideDistanceValue = BASE_SLIDE_DISTANCE;
     this.auraPulseMs = 0;
-    this.dashChargeAura.clear();
+    this.slideDistanceAura.clear();
 
     this.slashAngle = 0;
     this.slashActiveRemainingMs = 0;
@@ -297,19 +317,14 @@ export class TimePlayer {
     this.lastInputStateValue = null;
   }
 
-  /** Seconds until the baseline dash charge (see dashCharges' doc comment) regenerates, 0 if a charge is already available. */
-  get dashCooldownRemainingSec(): number {
-    return this.dashLockoutRemainingMs / 1000;
+  /** How much distance Slide can still cover right now. */
+  get slideDistanceAvailable(): number {
+    return this.slideDistance;
   }
 
-  /** How many dashes are banked and spendable right now. */
-  get dashChargesAvailable(): number {
-    return this.dashCharges;
-  }
-
-  /** The current ceiling on dashChargesAvailable - see setMaxDashCharges. */
-  get maxDashCharges(): number {
-    return this.maxDashChargesValue;
+  /** The current ceiling on slideDistanceAvailable - see setMaxSlideDistance. */
+  get maxSlideDistance(): number {
+    return this.maxSlideDistanceValue;
   }
 
   /** Seconds of Slash cooldown remaining (world-time-scaled), 0 if ready. */
@@ -318,11 +333,11 @@ export class TimePlayer {
   }
 
   get isInvincible(): boolean {
-    return this.isDashing || this.dashIframeTailRemainingMs > 0;
+    return this.isSliding;
   }
 
-  get isDashActive(): boolean {
-    return this.isDashing;
+  get isSlideActive(): boolean {
+    return this.isSliding;
   }
 
   takeDamage(): void {
@@ -383,98 +398,38 @@ export class TimePlayer {
   }
 
   /**
-   * Instantly completes the currently-regenerating charge (if any charge is
-   * missing) instead of making it wait out the rest of its timer - call this
-   * the instant any deflected projectile hits an enemy (same trigger, same
-   * call site, as resetSlashCooldown), so a successful hit hands back a dash
-   * right away. If that still leaves charges below the cap, the next one
-   * starts its own fresh timer immediately after, same as a normal regen
-   * tick (see tickCooldowns) - this only ever grants ONE charge per call, it
-   * doesn't fully refill to the cap (see setMaxDashCharges for the "at that
-   * moment" full top-up when the cap itself grows).
+   * Keeps slideDistanceAvailable's ceiling in sync with the live
+   * deflected-projectile chain (see TimeManager.liveMaxChainCount) - call
+   * every frame with BASE_SLIDE_DISTANCE * Math.max(1, that count). A no-op
+   * unless the ceiling actually changed since last frame: rising snaps the
+   * available distance straight up to the new max (a fresh chain hit hands
+   * over that much extra slide immediately, no waiting - see
+   * playChargeBanked), falling - the chain's source projectile despawned -
+   * resets it straight down (or back up) to the new max just as
+   * immediately, per "if the projectile despawns, the bonus resets."
+   * Deliberately snaps rather than clamping the existing amount: landing
+   * exactly on the new ceiling either way is what makes both directions
+   * read as one consistent "reset," not two different rules.
    */
-  resetDashCooldown(): void {
-    if (this.dashCharges < this.maxDashChargesValue) {
-      this.dashCharges++;
-      this.dashLockoutRemainingMs = this.dashCharges < this.maxDashChargesValue ? DASH_LOCKOUT_MS : 0;
-    } else {
-      this.dashLockoutRemainingMs = 0;
-    }
-  }
-
-  /**
-   * Keeps dashCharges' ceiling in sync with the live deflected-projectile
-   * chain (see TimeManager.liveMaxChainCount) - call every frame with
-   * Math.max(1, that count). A no-op unless the ceiling actually changed
-   * since last frame: rising snaps dashCharges straight up to the new max
-   * (a fresh chain hit hands over that many usable dashes immediately, no
-   * waiting), falling - the chain's source projectile despawned - resets
-   * dashCharges straight down (or back up) to the new max just as
-   * immediately, per "if the projectile despawns, their dashes reset."
-   * Deliberately snaps rather than clamping the existing count: landing
-   * exactly on the new ceiling either way is what makes both directions read
-   * as one consistent "reset," not two different rules.
-   */
-  setMaxDashCharges(maxCharges: number): void {
-    if (maxCharges === this.maxDashChargesValue) {
+  setMaxSlideDistance(maxDistance: number): void {
+    if (maxDistance === this.maxSlideDistanceValue) {
       return;
     }
-    if (maxCharges > this.maxDashChargesValue) {
+    if (maxDistance > this.maxSlideDistanceValue) {
       playChargeBanked();
     }
-    this.maxDashChargesValue = maxCharges;
-    this.dashCharges = maxCharges;
-    this.dashLockoutRemainingMs = 0;
-  }
-
-  private canDash(): boolean {
-    return this.dashCharges > 0 && !this.isDashing;
+    this.maxSlideDistanceValue = maxDistance;
+    this.slideDistance = maxDistance;
   }
 
   private canSlash(): boolean {
     return this.slashCooldownRemainingMs <= 0;
   }
 
-  private startDash(moveX: number, moveY: number): void {
-    const moveVector = new Phaser.Math.Vector2(moveX, moveY);
-    const dashDirection =
-      moveVector.lengthSq() > 0 ? moveVector.normalize() : new Phaser.Math.Vector2(Math.cos(this.aimAngle), Math.sin(this.aimAngle));
-
-    const dashVelocity = dashDirection.scale(DASH_SPEED);
-    this.clipOutwardComponent(dashVelocity);
-
-    this.isDashing = true;
-    this.dashTimeRemainingMs = DASH_DURATION_MS;
-    this.dashCharges--;
-    if (this.dashLockoutRemainingMs <= 0 && this.dashCharges < this.maxDashChargesValue) {
-      // Below the current cap and no regen already in flight - start one
-      // (only one charge regenerates at a time, see tickCooldowns).
-      this.dashLockoutRemainingMs = DASH_LOCKOUT_MS;
-    }
-    this.velocityX = dashVelocity.x;
-    this.velocityY = dashVelocity.y;
-    this.sprite.setTint(DASH_TINT);
-    this.spawnDashGhost();
-    playDash();
-  }
-
-  private updateDash(realDelta: number): void {
-    if (!this.isDashing) {
-      return;
-    }
-    this.spawnDashGhost();
-    this.dashTimeRemainingMs -= realDelta;
-    if (this.dashTimeRemainingMs <= 0) {
-      this.isDashing = false;
-      this.dashIframeTailRemainingMs = DASH_IFRAME_TAIL_MS;
-      this.sprite.clearTint();
-    }
-  }
-
-  /** A fading afterimage left behind during a dash, so the burst reads as motion rather than a teleport. */
-  private spawnDashGhost(): void {
+  /** A fading afterimage left behind while sliding, so it reads as motion rather than a teleport - the same "aftereffect" the old burst-dash had, just spawned continuously for as long as isSliding stays true instead of over a fixed duration. */
+  private spawnSlideGhost(): void {
     const ghost = this.scene.add.image(this.sprite.x, this.sprite.y, "time-player");
-    ghost.setTint(DASH_TINT);
+    ghost.setTint(SLIDE_TINT);
     ghost.setAlpha(0.5);
     this.scene.tweens.add({
       targets: ghost,
@@ -563,50 +518,52 @@ export class TimePlayer {
 
   /**
    * A pulsing ring (or several, for a bigger bank) around the player that
-   * only appears once a deflect chain has actually raised the dash-charge
-   * cap above the baseline of 1 - a visible "loaded" tell for the bonus
-   * mechanic, rather than a permanent fixture around the player during
-   * ordinary play. Ring count, pulse speed, and brightness all scale with
-   * dashCharges, so a bigger bank reads as more charged up at a glance.
-   * Not suppressed during the death replay - unlike the slash-range
-   * indicator, this isn't informing a live decision, it's just presentation
-   * (same as the dash ghost trail or slash flash, which also still play
-   * back).
+   * only appears once a deflect chain has actually raised the slide-distance
+   * cap above the baseline - a visible "loaded" tell for the bonus, rather
+   * than a permanent fixture around the player during ordinary play. Ring
+   * count/pulse speed scale with how many multiples of the baseline the
+   * current cap represents (i.e. the live chain length); brightness also
+   * scales with how full the tank currently is, so a drained bonus reads as
+   * dimmer than a full one even at the same chain length. Not suppressed
+   * during the death replay - unlike the slash-range indicator, this isn't
+   * informing a live decision, it's just presentation (same as the slide
+   * ghost trail or slash flash, which also still play back).
    */
-  private redrawDashChargeAura(): void {
-    this.dashChargeAura.clear();
-    if (this.maxDashChargesValue <= 1) {
+  private redrawSlideDistanceAura(): void {
+    this.slideDistanceAura.clear();
+    if (this.maxSlideDistanceValue <= BASE_SLIDE_DISTANCE) {
       return;
     }
-    const pulseSpeed = 1.2 + this.dashCharges * 0.35;
+    const chainFactor = this.maxSlideDistanceValue / BASE_SLIDE_DISTANCE;
+    const fillRatio = this.slideDistance / this.maxSlideDistanceValue;
+    const pulseSpeed = 1.2 + chainFactor * 0.35;
     const pulse = (Math.sin((this.auraPulseMs / 1000) * pulseSpeed * Math.PI * 2) + 1) / 2;
-    const ringCount = Math.min(4, Math.ceil(this.dashCharges / 2));
+    const ringCount = Math.min(4, Math.ceil(chainFactor / 2));
     const { x, y } = this.position;
     const baseR = TimePlayer.RADIUS * 1.3;
 
     for (let i = 0; i < ringCount; i++) {
       const spread = ringCount > 1 ? i / (ringCount - 1) : 0;
       const radius = baseR * (1.3 + spread * 0.9 + pulse * 0.15);
-      const alpha = (0.5 - spread * 0.28) * (0.5 + pulse * 0.5) * Math.min(1, this.dashCharges / 3);
-      this.dashChargeAura.lineStyle(2, DASH_TINT, Math.max(0, alpha));
-      this.dashChargeAura.strokeCircle(x, y, radius);
+      const alpha = (0.5 - spread * 0.28) * (0.5 + pulse * 0.5) * fillRatio;
+      this.slideDistanceAura.lineStyle(2, SLIDE_TINT, Math.max(0, alpha));
+      this.slideDistanceAura.strokeCircle(x, y, radius);
     }
   }
 
-  /** Dash lockout and Slash cooldown tick on world-scaled time; everything else about the player stays on real time (see class doc comment). */
-  private tickCooldowns(realDelta: number, worldScaledDelta: number): void {
-    if (this.dashLockoutRemainingMs > 0) {
-      this.dashLockoutRemainingMs = Math.max(0, this.dashLockoutRemainingMs - worldScaledDelta);
-      if (this.dashLockoutRemainingMs <= 0 && this.dashCharges < this.maxDashChargesValue) {
-        this.dashCharges++;
+  /**
+   * Slide's distance budget regenerates (a stamina meter, not discrete
+   * charges - see slideDistance's doc comment) and Slash's cooldown ticks
+   * down, both on world-scaled time; everything else about the player stays
+   * on real time (see class doc comment). Regen only runs while NOT actively
+   * sliding - spending and regenerating never happen in the same frame.
+   */
+  private tickCooldowns(worldScaledDelta: number): void {
+    if (!this.isSliding && this.slideDistance < this.maxSlideDistanceValue) {
+      this.slideDistance = Math.min(this.maxSlideDistanceValue, this.slideDistance + (SLIDE_REGEN_PX_PER_SEC * worldScaledDelta) / 1000);
+      if (this.slideDistance >= this.maxSlideDistanceValue) {
         playChargeRegen();
-        // Still below the cap after regenerating this one - start the next
-        // charge's timer right away rather than waiting a frame.
-        this.dashLockoutRemainingMs = this.dashCharges < this.maxDashChargesValue ? DASH_LOCKOUT_MS : 0;
       }
-    }
-    if (this.dashIframeTailRemainingMs > 0) {
-      this.dashIframeTailRemainingMs = Math.max(0, this.dashIframeTailRemainingMs - realDelta);
     }
     if (this.slashCooldownRemainingMs > 0) {
       this.slashCooldownRemainingMs = Math.max(0, this.slashCooldownRemainingMs - worldScaledDelta);

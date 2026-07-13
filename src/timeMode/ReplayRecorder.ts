@@ -1,11 +1,12 @@
 import { InputSource, InputState } from "../input/PlayerInput";
 
-/** One real frame's worth of raw input, captured during live play - see TimeMainScene's recording loop. Deliberately just the handful of numbers TimePlayer.update() actually reads (moveX/moveY/aimAngle/dashPressed/slashPressed), not a full world-state snapshot - replaying these through the exact same (now-deterministic, see SeededRandom) simulation reconstructs everything else. */
+/** One real frame's worth of raw input, captured during live play - see TimeMainScene's recording loop. Deliberately just the handful of numbers TimePlayer.update() actually reads (moveX/moveY/aimAngle/dashHeld/slashPressed), not a full world-state snapshot - replaying these through the exact same (now-deterministic, see SeededRandom) simulation reconstructs everything else. */
 export interface RecordedFrame {
   moveX: number;
   moveY: number;
   aimAngle: number;
-  dashPressed: boolean;
+  /** Whether Slide's button was held THIS frame - unlike dashPressed (a discrete one-shot trigger) back when Dash was a burst, Slide is a continuous held ability (see TimePlayer.update()), so the replay needs the real held state each frame, not just an edge. */
+  dashHeld: boolean;
   slashPressed: boolean;
   /** The real delta (ms) that frame actually advanced by - replayed as the step's own delta too (see TimeMainScene's replay loop), not whatever delta the replay's own render happens to produce, so movement distances match the original run exactly rather than drifting off variable frame timing. */
   realDelta: number;
@@ -14,9 +15,9 @@ export interface RecordedFrame {
 /**
  * Feeds back a previously-recorded run one frame per read() call, looping
  * back to the start once exhausted - the death-replay's input source, in
- * place of a live PlayerInput. dashHeld/slashHeld are reconstructed as
- * equal to their *Pressed counterparts (TimePlayer.update() never actually
- * reads the Held fields, they're only present to satisfy InputState).
+ * place of a live PlayerInput. dashPressed is reconstructed as false always
+ * and slashHeld as equal to slashPressed (TimePlayer.update() never actually
+ * reads either field, they're only present to satisfy InputState).
  */
 export class RecordedInputSource implements InputSource {
   private index = 0;
@@ -55,8 +56,8 @@ export class RecordedInputSource implements InputSource {
       moveX: frame.moveX,
       moveY: frame.moveY,
       aimAngle: frame.aimAngle,
-      dashHeld: frame.dashPressed,
-      dashPressed: frame.dashPressed,
+      dashHeld: frame.dashHeld,
+      dashPressed: false,
       slashHeld: frame.slashPressed,
       slashPressed: frame.slashPressed,
     };

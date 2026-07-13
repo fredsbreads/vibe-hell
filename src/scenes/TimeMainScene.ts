@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { TimePlayer } from "../timeMode/TimePlayer";
+import { TimePlayer, BASE_SLIDE_DISTANCE } from "../timeMode/TimePlayer";
 import { TimeManager, PROJECTILE_COLOR } from "../timeMode/TimeManager";
 import { ArenaBounds, ARENA_RADIUS } from "../config/arena";
 import { Arena } from "../arena/Arena";
@@ -218,7 +218,7 @@ export class TimeMainScene extends Phaser.Scene {
         moveX: inputState.moveX,
         moveY: inputState.moveY,
         aimAngle: inputState.aimAngle,
-        dashPressed: inputState.dashPressed,
+        dashHeld: inputState.dashHeld,
         slashPressed: inputState.slashPressed,
         realDelta: delta,
       });
@@ -229,13 +229,11 @@ export class TimeMainScene extends Phaser.Scene {
     this.arena.update(worldScaledDelta);
 
     const deflectResult = this.timeManager.update(delta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
-    this.player.setMaxDashCharges(Math.max(1, this.timeManager.liveMaxChainCount));
+    this.player.setMaxSlideDistance(BASE_SLIDE_DISTANCE * Math.max(1, this.timeManager.liveMaxChainCount));
     if (deflectResult.kills > 0) {
       // Reward a successful deflect chain with another swing right away,
-      // instead of making the player wait out Slash's full cooldown - and
-      // likewise hand back a dash immediately (see resetDashCooldown).
+      // instead of making the player wait out Slash's full cooldown.
       this.player.resetSlashCooldown();
-      this.player.resetDashCooldown();
     }
     const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
     this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), delta);
@@ -256,10 +254,10 @@ export class TimeMainScene extends Phaser.Scene {
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.enemiesDefeated}`);
     this.timescaleText.setText(`world: ${Math.round(worldTimescale * 100)}%`);
-    const dashLabel = this.buildDashLabel();
+    const slideLabel = this.buildSlideLabel();
     const slashLabel =
       this.player.slashCooldownRemainingSec > 0 ? `SLASH: ${this.player.slashCooldownRemainingSec.toFixed(1)}s` : "SLASH: READY";
-    this.statusText.setText(`${dashLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
+    this.statusText.setText(`${slideLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
     this.redrawArenaOutline();
 
     if (this.player.isDead) {
@@ -345,10 +343,9 @@ export class TimeMainScene extends Phaser.Scene {
       this.replayWorldTimeBudgetMs -= worldScaledDelta;
 
       const deflectResult = this.timeManager.update(stepDelta, worldScaledDelta, this.player.sprite.x, this.player.sprite.y);
-      this.player.setMaxDashCharges(Math.max(1, this.timeManager.liveMaxChainCount));
+      this.player.setMaxSlideDistance(BASE_SLIDE_DISTANCE * Math.max(1, this.timeManager.liveMaxChainCount));
       if (deflectResult.kills > 0) {
         this.player.resetSlashCooldown();
-        this.player.resetDashCooldown();
       }
       const slashKills = this.timeManager.checkSlashHits(this.player.getActiveSlashHitbox());
       this.timeManager.updateSlashPreview(this.player.getPreviewSlashHitbox(), stepDelta);
@@ -362,10 +359,10 @@ export class TimeMainScene extends Phaser.Scene {
     }
 
     this.scoreText.setText(`ENEMIES DEFEATED: ${this.replayEnemiesDefeated}`);
-    const dashLabel = this.buildDashLabel();
+    const slideLabel = this.buildSlideLabel();
     const slashLabel =
       this.player.slashCooldownRemainingSec > 0 ? `SLASH: ${this.player.slashCooldownRemainingSec.toFixed(1)}s` : "SLASH: READY";
-    this.statusText.setText(`${dashLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
+    this.statusText.setText(`${slideLabel}\n${slashLabel}\nHP: ${this.player.isDead ? "♡" : "♥"}`);
     this.redrawArenaOutline();
   }
 
@@ -597,19 +594,9 @@ export class TimeMainScene extends Phaser.Scene {
     this.scene.start("TimeTitleScene");
   }
 
-  /**
-   * "DASH: READY"/"DASH: 1.2s" whenever maxDashCharges is still the baseline
-   * of 1 - identical to the label before dash charges existed. Once a
-   * deflected-projectile chain has pushed the ceiling above 1, switches to a
-   * fraction (e.g. "DASH: 3/4") so the banked bonus charges are actually
-   * visible, since "READY"/a cooldown timer alone can't distinguish 1 banked
-   * dash from 4.
-   */
-  private buildDashLabel(): string {
-    if (this.player.maxDashCharges > 1) {
-      return `DASH: ${this.player.dashChargesAvailable}/${this.player.maxDashCharges}`;
-    }
-    return this.player.dashCooldownRemainingSec > 0 ? `DASH: ${this.player.dashCooldownRemainingSec.toFixed(1)}s` : "DASH: READY";
+  /** "SLIDE: 98/140" - current/max distance budget, rounded to whole pixels. Always shown as a fraction, even at the baseline cap, since it's a continuously-draining/regenerating meter now rather than a ready/cooldown binary. */
+  private buildSlideLabel(): string {
+    return `SLIDE: ${Math.round(this.player.slideDistanceAvailable)}/${Math.round(this.player.maxSlideDistance)}`;
   }
 
   private redrawArenaOutline(): void {
