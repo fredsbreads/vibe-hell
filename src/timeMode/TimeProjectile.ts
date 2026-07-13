@@ -346,7 +346,14 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
       burstSpeedScale = this.speed > 0 ? Math.min(1, burstSpeedCap / this.speed) : 1;
     }
 
-    this.msSinceLastWallBounce += effectiveDelta;
+    // realDelta, deliberately NOT effectiveDelta: whether a bounce landed
+    // "too soon" to fairly react to is a real wall-clock-time question,
+    // independent of the current world timescale. Using effectiveDelta
+    // (world-scaled once the burst window ends) would be actively wrong
+    // once the world's nearly frozen - a bounce pair separated by a tiny
+    // amount of WORLD time could still span a long stretch of real time
+    // (plenty of reaction time) while still reading as "instant" here.
+    this.msSinceLastWallBounce += realDelta;
 
     const dt = effectiveDelta / 1000;
 
