@@ -629,6 +629,29 @@ export class TimeManager {
     }
   }
 
+  /**
+   * Distance from point (px, py) to the closest point on the segment from
+   * (x1, y1) to (x2, y2) - standard closest-point-on-segment projection,
+   * clamping t to [0, 1] so it doesn't extrapolate past either endpoint.
+   * Used by checkDeflectedKills as a swept (segment, not just endpoint)
+   * collision test against fast-moving deflected projectiles - see
+   * MAX_DEFLECTED_SPEED's doc comment in TimeProjectile for why a plain
+   * endpoint-distance check isn't enough once a heavily-redeflected
+   * projectile's single-frame movement can exceed a target's hitbox size.
+   */
+  private distanceFromPointToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lengthSq = dx * dx + dy * dy;
+    if (lengthSq === 0) {
+      return Math.hypot(px - x1, py - y1);
+    }
+    const t = Phaser.Math.Clamp(((px - x1) * dx + (py - y1) * dy) / lengthSq, 0, 1);
+    const closestX = x1 + t * dx;
+    const closestY = y1 + t * dy;
+    return Math.hypot(px - closestX, py - closestY);
+  }
+
   /** A deflected/friendly projectile destroys any hostile projectile OR enemy it touches, for as long as it's alive. Returns how many kills happened this frame, plus the juice-intensity multiplier the caller should apply (see DeflectFrameResult) - the highest chainJuiceScale among this frame's enemy-bounce kills, or 1 if none of this frame's kills were chain kills. */
   private checkDeflectedKills(): DeflectFrameResult {
     let kills = 0;
@@ -641,10 +664,13 @@ export class TimeManager {
         if (hostile === deflected || !hostile.active || hostile.deflected) {
           continue;
         }
-        const dx = hostile.x - deflected.x;
-        const dy = hostile.y - deflected.y;
         const minDist = hostile.radius + deflected.radius;
-        if (dx * dx + dy * dy <= minDist * minDist) {
+        const dist = this.distanceFromPointToSegment(
+          hostile.x, hostile.y,
+          deflected.previousX, deflected.previousY,
+          deflected.x, deflected.y,
+        );
+        if (dist <= minDist) {
           spawnPop(this.scene, hostile.x, hostile.y, KILL_POP_COLOR);
           hostile.deactivate();
           kills++;
@@ -655,10 +681,13 @@ export class TimeManager {
         if (!enemy.isAlive) {
           continue;
         }
-        const dx = enemy.x - deflected.x;
-        const dy = enemy.y - deflected.y;
         const minDist = Enemy.RADIUS + deflected.radius;
-        if (dx * dx + dy * dy <= minDist * minDist) {
+        const dist = this.distanceFromPointToSegment(
+          enemy.x, enemy.y,
+          deflected.previousX, deflected.previousY,
+          deflected.x, deflected.y,
+        );
+        if (dist <= minDist) {
           const enemyX = enemy.x;
           const enemyY = enemy.y;
           enemy.deactivate();

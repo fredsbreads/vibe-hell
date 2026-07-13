@@ -26,7 +26,7 @@ export const DEFLECT_MAX_WALL_BOUNCES = 2;
  * previous one still reflects normally (it's not ignored physically), it
  * just doesn't count against the budget - see bounceOffWall(). Deliberately
  * world-scaled, not real time: every other "waiting" mechanic in this mode
- * (Dash's lockout, Slash's cooldown) already runs on world-scaled time, so
+ * (Slide's distance-budget regen, Slash's cooldown) already runs on world-scaled time, so
  * standing still doesn't let this grace period run out for free either -
  * consistent with the game's own rule that the world (and so a bounce
  * "expiring") only advances while you're moving.
@@ -37,6 +37,22 @@ const DEFLECT_LOCKED_TINT = 0x4d9fff;
 const DEFLECT_REDEFLECTABLE_TINT = 0x59f2c8;
 /** Deflected projectiles fly faster than the hostile speed they arrived at, on top of the real-time burst - reads as more dangerous/decisive, and outruns the enemy that fired it in the first place. */
 const DEFLECT_SPEED_MULTIPLIER = 1.6;
+/**
+ * Ceiling on the STEADY (post-burst) speed a deflected projectile can reach -
+ * it still compounds by DEFLECT_SPEED_MULTIPLIER on every redeflect, same as
+ * ever, this just stops it short of literally unbounded. Without this, a
+ * projectile chained/redeflected enough times (a few hundred) reaches a
+ * speed where a single frame's movement distance dwarfs the arena itself -
+ * it visually reads as "stuck at the wall" (it's actually being wall-clamped
+ * back onto the boundary nearly every frame, not stuck) and, more
+ * seriously, tunnels clean through enemies/hostile projectiles without
+ * registering a hit, since the per-frame movement distance vastly exceeds
+ * their hitbox size (see checkDeflectedKills' swept collision check in
+ * TimeManager, which is the other half of this fix - the cap alone still
+ * leaves the geometrically-possible case where the capped speed still
+ * covers more than a hitbox's width in one frame).
+ */
+const MAX_DEFLECTED_SPEED = 6000;
 
 /**
  * How long, in real (undilated) ms, a just-deflected projectile keeps moving
@@ -142,6 +158,9 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
 
   private vx = 0;
   private vy = 0;
+  /** Position at the start of the most recent step() call, before that step's movement - see step()'s snapshot and the previousX/previousY getters, used for swept collision checks against fast-moving deflected projectiles. */
+  private prevStepX = 0;
+  private prevStepY = 0;
   private isDeflected = false;
   private wallBounceCount = 0;
   /** World-scaled ms elapsed since the last wall bounce (or since deflect()/bounceOffPoint(), whichever's more recent) - see MIN_MS_BETWEEN_WALL_BOUNCES. */
@@ -187,6 +206,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.setPosition(x, y);
     this.vx = Math.cos(aimAngle) * this.speed;
     this.vy = Math.sin(aimAngle) * this.speed;
+    this.prevStepX = x;
+    this.prevStepY = y;
     this.isDeflected = false;
     this.wallBounceCount = 0;
     this.msSinceLastWallBounce = Infinity;
@@ -248,6 +269,14 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     return this.speed * DEFLECT_SPEED_MULTIPLIER;
   }
 
+  /** Position before the most recent step()'s movement - together with the current x/y, forms the segment a swept collision check (see TimeManager.checkDeflectedKills) tests against target hitboxes, instead of only checking the post-move endpoint - necessary once a heavily-redeflected projectile's per-frame movement can exceed a target's hitbox size (see MAX_DEFLECTED_SPEED). */
+  get previousX(): number {
+    return this.prevStepX;
+  }
+  get previousY(): number {
+    return this.prevStepY;
+  }
+
   /** The tint the sprite/tail should currently show - hostile is its own kind color, deflected-but-not-yet-redeflectable (locked) is dark blue, redeflectable is teal. Single source of truth so the sprite tint and the tail color can never disagree. */
   private get currentTintColor(): number {
     if (!this.isDeflected) {
@@ -265,7 +294,9 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
    * before it can be re-deflected again. Speed COMPOUNDS: each redeflect
    * multiplies the CURRENT speed by DEFLECT_SPEED_MULTIPLIER again, not the
    * original kind speed, so a projectile that's been redirected multiple
-   * times keeps getting faster.
+   * times keeps getting faster - up to MAX_DEFLECTED_SPEED, past which
+   * further redeflects still land (deflectCount/chainKillCount keep
+   * climbing) but no longer add more speed.
    */
   deflect(aimAngle: number, swingId: number): void {
     this.isDeflected = true;
@@ -280,7 +311,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.lastHitSwingId = swingId;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
     this.deflectCount++;
-    this.speed *= DEFLECT_SPEED_MULTIPLIER;
+    this.speed = Math.min(this.speed * DEFLECT_SPEED_MULTIPLIER, MAX_DEFLECTED_SPEED);
     this.vx = Math.cos(aimAngle) * this.speed;
     this.vy = Math.sin(aimAngle) * this.speed;
     this.updateTailLength();
@@ -335,6 +366,12 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
    * Returns true once it should be despawned.
    */
   step(realDelta: number, worldScaledDelta: number, arena: Arena, playerX: number, playerY: number): boolean {
+    // Snapshotted BEFORE any movement this step - see previousX/previousY,
+    // used for swept (segment, not just endpoint) collision checks against
+    // fast-moving deflected projectiles.
+    this.prevStepX = this.x;
+    this.prevStepY = this.y;
+
     let effectiveDelta = worldScaledDelta;
     // Caps the burst's effective speed (and so the distance it covers over
     // its fixed DEFLECT_BURST_MS window) at whatever it was on the
@@ -352,8 +389,8 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     }
 
     // worldScaledDelta, not realDelta or effectiveDelta: matches every other
-    // "waiting" mechanic in this mode (Dash's lockout, Slash's cooldown),
-    // which all run on world-scaled time - standing still doesn't let this
+    // "waiting" mechanic in this mode (Slide's distance-budget regen, Slash's
+    // cooldown), which all run on world-scaled time - standing still doesn't let this
     // grace period run out for free either, consistent with the game's own
     // rule that the world only advances while you're moving.
     this.msSinceLastWallBounce += worldScaledDelta;

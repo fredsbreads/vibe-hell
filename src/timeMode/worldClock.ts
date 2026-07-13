@@ -17,7 +17,7 @@
  * Never quite zero at full rest - matches SUPERHOT's own idle behavior
  * (close to frozen, not literally frozen), so there's still a way to
  * progress by waiting alone, just an extremely slow one. Also means
- * world-time-gated cooldowns (Dash lockout, Slash cooldown) aren't
+ * world-time-gated cooldowns (Slide's distance-budget regen, Slash cooldown) aren't
  * permanently stuck if a player never moves at all.
  */
 export const MIN_WORLD_TIMESCALE = 0.02;
