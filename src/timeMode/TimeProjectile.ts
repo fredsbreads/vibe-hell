@@ -165,6 +165,18 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
   private wallBounceCount = 0;
   /** World-scaled ms elapsed since the last wall bounce (or since deflect()/bounceOffPoint(), whichever's more recent) - see MIN_MS_BETWEEN_WALL_BOUNCES. */
   private msSinceLastWallBounce = 0;
+  /**
+   * Whether this deflect/enemy-bounce "life" has already spent its one
+   * MIN_MS_BETWEEN_WALL_BOUNCES grace bounce - see bounceOffWall(). Without
+   * this, a fast projectile chaining several sub-150ms bounces in a row
+   * (e.g. clipping a corner) would have EVERY one of those bounces forgiven,
+   * since msSinceLastWallBounce resets after each bounce regardless of
+   * whether it counted - letting it ping-pong indefinitely without ever
+   * accumulating toward DEFLECT_MAX_WALL_BOUNCES. Reset to false wherever
+   * msSinceLastWallBounce resets to Infinity (deflect()/bounceOffPoint()) -
+   * exactly one grace bounce per life, not one per gap.
+   */
+  private wallBounceGraceUsed = false;
   private deflectBurstRemainingMs = 0;
   /** Whether this projectile has bounced off an enemy since its last deflect - see the isReDeflectable doc comment. */
   private bouncedOffEnemySinceDeflect = false;
@@ -211,6 +223,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     this.isDeflected = false;
     this.wallBounceCount = 0;
     this.msSinceLastWallBounce = Infinity;
+    this.wallBounceGraceUsed = false;
     this.deflectBurstRemainingMs = 0;
     this.bouncedOffEnemySinceDeflect = false;
     this.lastHitSwingId = -1;
@@ -307,6 +320,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     // that follows ANOTHER bounce too quickly, not the first one after a
     // fresh deflect.
     this.msSinceLastWallBounce = Infinity;
+    this.wallBounceGraceUsed = false;
     this.bouncedOffEnemySinceDeflect = false;
     this.lastHitSwingId = swingId;
     this.deflectBurstRemainingMs = DEFLECT_BURST_MS;
@@ -350,6 +364,7 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
       // refresh "the next wall bounce always counts", not start it off
       // artificially protected.
       this.msSinceLastWallBounce = Infinity;
+      this.wallBounceGraceUsed = false;
       this.bouncedOffEnemySinceDeflect = true;
       this.chainHitCount++;
       this.setTintFill(this.currentTintColor);
@@ -481,10 +496,17 @@ export class TimeProjectile extends Phaser.GameObjects.Image {
     }
 
     if (this.isDeflected) {
-      // Only counts against the budget if there was real time since the last
-      // one - see MIN_MS_BETWEEN_WALL_BOUNCES. Reset either way: the NEXT
-      // bounce should be judged against THIS one's timing, not an earlier one.
-      if (this.msSinceLastWallBounce >= MIN_MS_BETWEEN_WALL_BOUNCES) {
+      // Forgiven only if it landed within the grace window AND that grace
+      // hasn't already been spent this life (see wallBounceGraceUsed) - a
+      // fast projectile chaining several sub-MIN_MS_BETWEEN_WALL_BOUNCES
+      // bounces in a row (e.g. off a corner) only gets the FIRST of those
+      // forgiven; every one after that counts against the budget regardless
+      // of how little time has passed, so it can't ping-pong for free
+      // indefinitely. Reset either way: the NEXT bounce should be judged
+      // against THIS one's timing, not an earlier one.
+      if (this.msSinceLastWallBounce < MIN_MS_BETWEEN_WALL_BOUNCES && !this.wallBounceGraceUsed) {
+        this.wallBounceGraceUsed = true;
+      } else {
         this.wallBounceCount++;
       }
       this.msSinceLastWallBounce = 0;
